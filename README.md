@@ -76,7 +76,7 @@ Minit is open source and focused first on making this local-to-live experience a
 
 ---
 
-# 한글 설명
+# 미닛
 
 **Minit은 내 PC에서 실행 중인 앱을 바로 외부 사용자에게 공개할 수 있게 해주는 오픈소스 도구입니다.**
 
