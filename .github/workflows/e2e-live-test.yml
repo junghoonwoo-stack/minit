@@ -1,0 +1,74 @@
+name: Minit live E2E test
+
+on:
+  push:
+    branches:
+      - agent/e2e-live-test
+    paths-ignore:
+      - LIVE_URL.txt
+
+permissions:
+  contents: write
+
+jobs:
+  live-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/e2e-live-test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Minit
+        run: pip install -e .
+
+      - name: Start demo app
+        run: |
+          mkdir -p /tmp/minit-demo
+          cat > /tmp/minit-demo/index.html <<'EOF'
+          <!doctype html><html><body><h1>Minit live test</h1><p>If you can see this, Minit works.</p></body></html>
+          EOF
+          cd /tmp/minit-demo
+          python -m http.server 8000 >/tmp/demo.log 2>&1 &
+          sleep 2
+          curl -fsS http://127.0.0.1:8000
+
+      - name: Run Minit and publish URL
+        run: |
+          set -e
+          cd /tmp/minit-demo
+          nohup minit run --port 8000 >/tmp/minit.log 2>&1 &
+          MINIT_PID=$!
+          URL=""
+          for i in $(seq 1 60); do
+            URL=$(grep -Eo 'https://[A-Za-z0-9-]+\.trycloudflare\.com' /tmp/minit.log | head -1 || true)
+            if [ -n "$URL" ]; then break; fi
+            sleep 2
+          done
+          echo "=== MINIT LOG ==="
+          cat /tmp/minit.log
+          if [ -z "$URL" ]; then
+            echo "No public URL created"
+            exit 1
+          fi
+          echo "Public URL: $URL"
+          for i in $(seq 1 20); do
+            if curl -fsS "$URL" | grep -q 'Minit live test'; then
+              echo "External request succeeded"
+              break
+            fi
+            sleep 2
+          done
+          echo "$URL" > LIVE_URL.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add LIVE_URL.txt
+          git commit -m 'Record temporary Minit live URL'
+          git push origin HEAD:agent/e2e-live-test
+          echo "Keeping tunnel alive briefly for manual verification..."
+          sleep 300
+          kill "$MINIT_PID" || true
