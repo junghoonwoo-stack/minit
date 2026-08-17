@@ -212,10 +212,6 @@ def run(
     port: int | None = typer.Option(None, "--port", "-p", help="Local HTTP port. Auto-detected when omitted."),
 ):
     """Publish an already-running local web app to a shareable URL."""
-    manifest, created = ensure_manifest()
-    if created:
-        console.print(f"[dim]Created Minit app identity: {manifest['name']}[/dim]")
-
     selected_port = port or _detect_port()
     if selected_port is None:
         console.print("[red]No local web app found.[/red]")
@@ -225,6 +221,10 @@ def run(
     if not _port_open(selected_port):
         console.print(f"[red]No app is listening on 127.0.0.1:{selected_port}[/red]")
         raise typer.Exit(1)
+
+    manifest, created = ensure_manifest()
+    if created:
+        console.print(f"[dim]Created Minit app identity: {manifest['name']}[/dim]")
 
     status = _check_http(selected_port)
     console.print(f"[green]✓ Local app:[/green] http://127.0.0.1:{selected_port} ({status})")
