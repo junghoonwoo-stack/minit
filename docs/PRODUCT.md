@@ -2,57 +2,49 @@
 
 ## Thesis
 
-AI coding dramatically reduces the cost of building small software. The next bottleneck is deployment and operation.
+AI coding dramatically reduces the cost of building software. The next bottleneck is deployment.
 
-Traditional enterprise IT assumes applications are centralized, durable, and important enough to deserve dedicated infrastructure. AI coding creates a new class of software: small, useful, disposable or semi-permanent tools created by individuals for a handful of coworkers.
+Minit is for the person who has a working app on their PC and wants real users to try it immediately — without learning cloud infrastructure first.
 
-Minit provides infrastructure for that new class: **Micro IT**.
-
-## Category
-
-**Micro IT** — small applications, small audiences, local ownership, lightweight operations.
-
-Minit is the runtime for Micro IT.
-
-## Positioning
-
-Primary description:
-
-> **Minit is the open-source way to publish a small app directly from your own computer.**
-
-Fast analogy:
-
-> **Replit Deployments, but your PC is the server.**
-
-Enterprise description:
-
-> **A controlled local-to-team deployment layer for employee-built applications.**
-
-## Why now
-
-Before AI coding, writing the application was the expensive part. A company could justify centralized deployment because relatively few people created software.
-
-With AI coding, thousands of employees can create useful tools. Requiring every 5-person tool to follow the same infrastructure path as a production enterprise system recreates the old IT bottleneck after development has already become cheap.
+> **Your PC is the first server. Launch first. Cloud later.**
 
 ## Initial user
 
 Someone who:
-- has a working web app on their laptop/desktop
-- wants 2–20 people to use it
-- does not want to learn cloud deployment
-- does not need 24×7 reliability
-- is willing to keep their PC running while the tool is in use
+- built an app with Claude Code, Codex, Cursor, or similar tools
+- has it working on localhost
+- wants a few real users quickly
+- does not know or care about server operations yet
+- is willing to keep their PC on while testing demand
 
 ## Killer moment
 
 ```bash
-minit run --port 8501
+minit run
 ```
 
 Result:
 
 ```text
-https://blue-panda.minit.run
+https://your-app.example.com
 ```
 
-Copy link. Send to team. Done.
+Copy the link. Send it to users. Learn.
+
+## Lifecycle
+
+```text
+Local OSS → Real users → Minit Cloud → Minit Managed
+```
+
+The open-source product gets the user from localhost to real users. Hosted services become valuable only after real usage appears.
+
+Minit Cloud adds stable identity, URLs, authentication, logs and managed networking. Minit Managed later moves the same app to always-on compute.
+
+The key product promise is continuity: the app should not need to be rebuilt or re-platformed as it grows.
+
+## Category
+
+**Micro IT** — software small enough to be built, launched and initially operated by one person.
+
+Teams and enterprises are a later extension of the same model, not the first target.
