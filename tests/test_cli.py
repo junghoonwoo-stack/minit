@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from minit.cli import URL_RE, _detect_port, app
+from minit.cli import URL_RE, _cloudflared_asset, _detect_port, app
 
 runner = CliRunner()
 
@@ -26,9 +26,14 @@ def test_run_fails_cleanly_without_local_app():
     assert "No local web app found" in result.stdout
 
 
-def test_doctor_reports_missing_cloudflared():
+def test_doctor_says_networking_will_prepare_automatically():
     with patch("minit.cli._cloudflared_path", return_value=None), patch("minit.cli._detect_port", return_value=8501):
         result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
-    assert "cloudflared" in result.stdout
+    assert "prepare automatically" in result.stdout
     assert "8501" in result.stdout
+
+
+def test_cloudflared_asset_for_macos_arm64():
+    with patch("minit.cli.platform.system", return_value="Darwin"), patch("minit.cli.platform.machine", return_value="arm64"):
+        assert _cloudflared_asset() == ("cloudflared-darwin-arm64.tgz", True)
