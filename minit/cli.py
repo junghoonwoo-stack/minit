@@ -14,6 +14,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from minit.state import create_manifest, ensure_manifest, load_manifest, manifest_path
+
 app = typer.Typer(no_args_is_help=True, help="Publish local apps from your own computer.")
 console = Console()
 
@@ -177,10 +179,43 @@ def _start_quick_tunnel(port: int) -> None:
 
 
 @app.command()
+def init(name: str | None = typer.Option(None, "--name", "-n", help="App name. Defaults to the current directory name.")):
+    """Create a persistent Minit app identity for this project."""
+    existing = load_manifest()
+    if existing:
+        console.print(f"[yellow]Minit app already initialized:[/yellow] {existing['name']} ({existing['id']})")
+        return
+
+    manifest = create_manifest(name=name)
+    console.print(f"[green]✓ Initialized:[/green] {manifest['name']}")
+    console.print(f"[dim]App ID: {manifest['id']}[/dim]")
+    console.print(f"[dim]Saved to {manifest_path()}[/dim]")
+
+
+@app.command()
+def info():
+    """Show the current Minit app identity and runtime."""
+    manifest = load_manifest()
+    if not manifest:
+        console.print("[yellow]This project is not initialized yet.[/yellow]")
+        console.print("Run [bold]minit init[/bold] or simply [bold]minit run[/bold].")
+        return
+
+    console.print(f"[bold]{manifest['name']}[/bold]")
+    console.print(f"  app id:   {manifest['id']}")
+    console.print(f"  runtime:  {manifest.get('runtime', 'local')}")
+    console.print(f"  provider: {manifest.get('provider', 'auto')}")
+
+
+@app.command()
 def run(
     port: int | None = typer.Option(None, "--port", "-p", help="Local HTTP port. Auto-detected when omitted."),
 ):
     """Publish an already-running local web app to a shareable URL."""
+    manifest, created = ensure_manifest()
+    if created:
+        console.print(f"[dim]Created Minit app identity: {manifest['name']}[/dim]")
+
     selected_port = port or _detect_port()
     if selected_port is None:
         console.print("[red]No local web app found.[/red]")
@@ -208,6 +243,7 @@ def doctor(
         console.print(f"  local app:   [green]127.0.0.1:{selected_port}[/green]")
     else:
         console.print("  local app:   [yellow]not detected[/yellow]")
+    console.print(f"  app identity: {'[green]ready[/green]' if load_manifest() else '[yellow]will create automatically[/yellow]'}")
     console.print(f"  directory:   {Path.cwd()}")
 
 
