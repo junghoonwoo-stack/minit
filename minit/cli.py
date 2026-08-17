@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import os
+import platform
 import re
 import shutil
 import socket
 import subprocess
-import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
-import httpx
 import typer
 from rich.console import Console
 
@@ -16,6 +19,7 @@ console = Console()
 
 COMMON_PORTS = (3000, 5173, 8000, 8080, 8501, 8888)
 URL_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+CLOUDFLARED_RELEASE_BASE = "https://github.com/cloudflare/cloudflared/releases/latest/download"
 
 
 def _port_open(port: int) -> bool:
@@ -31,31 +35,96 @@ def _detect_port() -> int | None:
     return None
 
 
-def _cloudflared_path() -> str | None:
-    return shutil.which("cloudflared")
+def _cache_dir() -> Path:
+    root = Path(os.environ.get("MINIT_HOME", Path.home() / ".minit"))
+    return root / "bin"
 
 
-def _install_hint() -> str:
-    if sys.platform == "darwin":
-        return "Install cloudflared first: brew install cloudflared"
-    if sys.platform.startswith("win"):
-        return "Install cloudflared first: winget install --id Cloudflare.cloudflared"
-    return "Install cloudflared first using Cloudflare's official package for your Linux distribution."
+def _cloudflared_asset() -> tuple[str, bool]:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if machine in {"x86_64", "amd64"}:
+        arch = "amd64"
+    elif machine in {"arm64", "aarch64"}:
+        arch = "arm64"
+    else:
+        raise RuntimeError(f"Unsupported CPU architecture: {machine}")
+
+    if system == "windows":
+        if arch != "amd64":
+            raise RuntimeError("Automatic tunnel setup currently supports Windows x64 only.")
+        return "cloudflared-windows-amd64.exe", False
+    if system == "darwin":
+        return f"cloudflared-darwin-{arch}.tgz", True
+    if system == "linux":
+        return f"cloudflared-linux-{arch}", False
+
+    raise RuntimeError(f"Unsupported operating system: {system}")
+
+
+def _download_cloudflared(destination: Path) -> Path:
+    asset, compressed = _cloudflared_asset()
+    url = f"{CLOUDFLARED_RELEASE_BASE}/{asset}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    console.print("[dim]First run: preparing Minit networking...[/dim]")
+
+    with tempfile.TemporaryDirectory(prefix="minit-") as tmp:
+        downloaded = Path(tmp) / asset
+        urllib.request.urlretrieve(url, downloaded)
+
+        if compressed:
+            with tarfile.open(downloaded, "r:gz") as archive:
+                member = next((m for m in archive.getmembers() if Path(m.name).name == "cloudflared"), None)
+                if member is None:
+                    raise RuntimeError("Downloaded tunnel package did not contain cloudflared.")
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise RuntimeError("Could not extract tunnel binary.")
+                with destination.open("wb") as out:
+                    shutil.copyfileobj(extracted, out)
+        else:
+            shutil.copy2(downloaded, destination)
+
+    if os.name != "nt":
+        destination.chmod(0o755)
+    return destination
+
+
+def _cloudflared_path(auto_install: bool = True) -> str | None:
+    system_binary = shutil.which("cloudflared")
+    if system_binary:
+        return system_binary
+
+    filename = "cloudflared.exe" if os.name == "nt" else "cloudflared"
+    cached = _cache_dir() / filename
+    if cached.exists():
+        return str(cached)
+
+    if not auto_install:
+        return None
+
+    try:
+        return str(_download_cloudflared(cached))
+    except Exception as exc:
+        console.print(f"[red]Minit could not prepare networking automatically:[/red] {exc}")
+        return None
 
 
 def _check_http(port: int) -> str:
     try:
-        response = httpx.get(f"http://127.0.0.1:{port}", timeout=2.0, follow_redirects=True)
-        return str(response.status_code)
+        request = urllib.request.Request(f"http://127.0.0.1:{port}", method="GET")
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            return str(response.status)
     except Exception:
         return "reachable"
 
 
 def _start_quick_tunnel(port: int) -> None:
-    binary = _cloudflared_path()
+    binary = _cloudflared_path(auto_install=True)
     if not binary:
-        console.print(f"[red]cloudflared was not found.[/red]\n{_install_hint()}")
-        console.print("[dim]Minit v0.1 uses Cloudflare Quick Tunnel as its temporary relay transport.[/dim]")
+        console.print("[red]Could not start Minit networking.[/red]")
         raise typer.Exit(2)
 
     command = [
@@ -84,10 +153,10 @@ def _start_quick_tunnel(port: int) -> None:
                 published_url = match.group(0)
                 console.print()
                 console.print(f"[bold green]✓ Live URL:[/bold green] {published_url}")
-                console.print(f"[green]✓ Compute:[/green]  this PC")
+                console.print("[green]✓ Compute:[/green]  this PC")
                 console.print("[green]✓ Status:[/green]   live while this terminal and PC stay on")
                 console.print()
-                console.print("[bold]Send the URL to your first users.[/bold]")
+                console.print("[bold]Send the URL to your users.[/bold]")
                 console.print("[dim]Press Ctrl+C to stop publishing.[/dim]")
 
             if "ERR" in line or "error" in line.lower():
@@ -95,7 +164,7 @@ def _start_quick_tunnel(port: int) -> None:
 
         return_code = process.wait()
         if return_code and not published_url:
-            console.print("[red]Could not create a public tunnel.[/red]")
+            console.print("[red]Could not create a public link.[/red]")
             raise typer.Exit(return_code)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping Minit...[/yellow]")
@@ -134,14 +203,12 @@ def doctor(
     """Check whether this computer is ready to publish with Minit."""
     selected_port = port or _detect_port()
     console.print("[bold]Minit doctor[/bold]")
-    console.print(f"  cloudflared: {'[green]ready[/green]' if _cloudflared_path() else '[red]missing[/red]'}")
+    console.print("  networking:  [green]ready[/green]" if _cloudflared_path(auto_install=False) else "  networking:  [yellow]will prepare automatically on first run[/yellow]")
     if selected_port:
         console.print(f"  local app:   [green]127.0.0.1:{selected_port}[/green]")
     else:
         console.print("  local app:   [yellow]not detected[/yellow]")
     console.print(f"  directory:   {Path.cwd()}")
-    if not _cloudflared_path():
-        console.print(f"\n{_install_hint()}")
 
 
 if __name__ == "__main__":
