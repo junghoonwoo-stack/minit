@@ -1,188 +1,300 @@
 # Minit
 
-**Publish small apps from your own computer.**
+**Turn a local AI-built app into a live web service — from your own PC.**
 
-> Think Replit Deployments, but your PC is the server.
+> Build with Claude Code, Codex, Cursor, or your favorite AI coding tool. Run it on your PC. Share one link. See if anyone actually wants it.
 
-Minit is an open-source lightweight runtime for turning a local app into a small team app without setting up a traditional server.
+Minit is an open-source runtime for people who can build software with AI but do not want to become cloud or server operators just to test an idea.
 
-Build with Claude Code, Codex, Cursor, Replit, Lovable, or any framework you like. Run the app on your own computer, then use Minit to give 5–10 teammates a secure link.
+You already have an app working on your laptop. Minit makes the next step simple:
 
 ```text
-Local app → minit run → secure outbound tunnel → team URL
-    ↑                                              ↓
- your PC                                    5–10 teammates
+AI coding → local app → minit run → public/private URL → real users
+                            ↑
+                       your own PC
 ```
+
+No VM. No Docker required. No cloud account. No server setup.
+
+Your PC is the server until you need something bigger.
 
 ## Why Minit?
 
-AI coding made software cheap to build. Deployment and operation are still surprisingly heavy.
+AI coding has made it dramatically easier for one person to build a working product.
 
-A useful internal tool can be created in hours, but sharing it often turns into a server request, cloud account, firewall review, SSO integration, secrets management, deployment pipeline, and operations project.
+But the moment you want someone else to use it, the experience changes:
 
-Minit is for the gap between **"it works on my PC"** and **"let's make this an enterprise system."**
+- Where do I host this?
+- What is a server?
+- Do I need AWS, Azure, or GCP?
+- How do I configure HTTPS and domains?
+- How do I keep API keys safe?
+- How do I let only a few people in?
+- What happens when the app becomes popular?
 
-- No dedicated server for small tools
-- Your computer remains the compute
-- Share with a link
-- Outbound connection only; no inbound firewall rule
-- Basic authentication and allowlists
-- TLS through the relay
-- Stop the app when you are done
-- If the PC reboots, just run it again
+For many early products, this infrastructure is unnecessary.
 
-## The one-line explanation
+If you are testing an idea with 3, 10, or 30 users, the computer that already runs the app may be enough.
 
-**Minit is the open-source way to publish a small app directly from your own computer.**
+**Minit lets you start there.**
 
-Alternative shorthand:
+## The simplest possible workflow
 
-> **Replit Deployments, but your PC is the server.**
-
-## Who is it for?
-
-### Individuals
-You made a useful app locally and want a few people to use it without learning cloud infrastructure.
-
-### Teams
-A team needs small internal tools that are useful but not important enough to justify a production platform.
-
-### Enterprises
-Employees are building more software with AI. Minit provides a controlled path for small-team deployment with company authentication, policy, logging, and centrally managed relay infrastructure.
-
-## Example
-
-Your app already runs locally:
+Your app is already running locally:
 
 ```bash
-streamlit run app.py --server.port 8501
+python app.py
+# or
+streamlit run app.py
+# or
+npm run dev
 ```
 
-Publish it:
+Then:
 
 ```bash
-minit run --port 8501
+minit run
 ```
 
-Minit returns:
+Minit gives you a URL:
 
 ```text
-✓ Local app: http://127.0.0.1:8501
-✓ Team URL:  https://blue-panda.minit.run
-✓ Access:    invite-only
-✓ Compute:   this computer
+✓ App detected: http://127.0.0.1:8501
+✓ Live URL:     https://blue-panda.minit.run
+✓ Compute:      this PC
 ```
 
-Send the URL to your teammates. Your computer stays on while they use it.
+Send the link to users.
+
+Keep your PC on while they use the app. If your PC is off, the service is off. That is okay — Minit is designed for the stage where speed of learning matters more than infrastructure perfection.
+
+## Who is Minit for?
+
+### 1. AI app builders
+
+You built something with Claude Code, Codex, Cursor, or another AI coding tool and it works on your machine.
+
+Now you want real people to try it without first learning cloud infrastructure.
+
+### 2. People testing product-market fit
+
+You do not know yet whether your app deserves a production architecture.
+
+You want to:
+
+**build → publish → send a link → observe users → improve**
+
+as quickly as possible.
+
+### 3. Small teams and enterprises — later
+
+The same problem exists inside companies: employees create useful AI-built tools, but even a five-person deployment can trigger a full IT process.
+
+Minit can eventually provide company authentication, policy, audit logs, private relays, and app registries. This is an important use case, but the first priority is making Minit exceptionally easy for individual builders.
+
+## Local first. Managed when needed.
+
+Minit should not force users into hosting before their product needs hosting.
+
+Start with:
+
+```text
+Users
+  ↓
+Minit secure relay
+  ↓
+Your PC
+  ↓
+Your app
+```
+
+Your PC provides the compute. Minit only makes it safely reachable.
+
+If the app grows, your PC becomes inconvenient, or you need 24×7 availability:
+
+```text
+minit move --managed
+```
+
+The goal is for Minit to move the same app to managed infrastructure while keeping the important things unchanged:
+
+- same URL
+- same users
+- same secrets/configuration
+- same logs
+- same app identity
+
+**Start on your PC. Move to managed hosting only when the product earns it.**
+
+## What makes Minit different?
+
+### Your PC is a valid first server
+
+Most deployment products assume cloud infrastructure from day one. Minit assumes that early software is small, uncertain, and changing quickly.
+
+### Built for AI-generated apps
+
+Minit should automatically understand common projects created by AI coding tools: Python, FastAPI, Flask, Streamlit, Gradio, Node.js, Next.js, and similar stacks.
+
+The long-term goal is simple:
+
+```bash
+minit run
+```
+
+Minit discovers how the app runs, finds its port, identifies required environment variables, and publishes it with minimal configuration.
+
+### A natural path from local to production
+
+Minit is not only a tunnel. It should preserve the application's identity and configuration so that moving from a laptop to managed infrastructure feels like changing the runtime, not rebuilding the product.
+
+That portability is a core product principle.
 
 ## Product principles
 
-1. **Local-first compute** — the app and its data can remain on the user's machine.
-2. **Small-team by design** — optimize for 1–20 users, not internet-scale traffic.
-3. **Zero-ops default** — no Docker, Kubernetes, VM, or cloud account required for the basic path.
-4. **Safe enough by default** — TLS, authentication, access control, and audit metadata should be automatic.
-5. **Graduate, don't scale forever** — when an app becomes mission-critical, move it to proper production infrastructure.
-6. **Open-source core** — local agent and self-hostable relay remain available to everyone.
+1. **One command to publish.** If deployment requires infrastructure knowledge, we have failed.
+2. **Local-first.** Use the machine you already own before renting another one.
+3. **Optimize for learning speed.** Early products need user feedback more than high availability.
+4. **No production theater.** A five-user experiment does not need Kubernetes.
+5. **Secure defaults.** TLS, secrets, basic access control, and safe networking should happen automatically.
+6. **Open-source core.** Anyone should be able to run and understand the core system.
+7. **Managed is an upgrade, not a prerequisite.** Pay for hosting when the app has earned the need for it.
 
 ## Architecture
 
 ```text
-                   ┌──────────────────────────┐
-                   │       Minit Relay        │
-                   │  OSS self-host / Cloud   │
-                   └───────────┬──────────────┘
-                               │ TLS
-                         outbound tunnel
-                               │
-┌──────────────────────────────▼─────────────────────────────┐
-│                       Your computer                        │
-│                                                          │
-│  App :8501  ◄──── Minit Agent ──── Auth / policy / logs   │
-└───────────────────────────────────────────────────────────┘
-                               ▲
-                               │ https://*.minit.run
-                               │
-                   ┌───────────┴───────────┐
-                   │     Team members      │
-                   │       5–10 users      │
-                   └───────────────────────┘
+                         Internet
+                            │
+                  https://*.minit.run
+                            │
+                   ┌────────▼────────┐
+                   │   Minit Relay   │
+                   └────────┬────────┘
+                            │ encrypted outbound connection
+                            │
+              ┌─────────────▼─────────────┐
+              │         Your PC           │
+              │                           │
+              │ Minit Agent → Local App   │
+              │               :3000/:8000 │
+              └───────────────────────────┘
 ```
 
-The local agent opens an **outbound** encrypted connection to a relay. Teammates connect to the relay URL; requests are forwarded through that connection to the local app. This avoids exposing a local listening port directly to the internet.
+The Minit Agent establishes an outbound encrypted connection. Users connect through the Minit URL, and traffic is forwarded to the app already running on your PC.
 
-## Open source + hosted business model
+The user should not need to configure a public IP address, router port forwarding, or inbound firewall rules.
+
+## Open source + hosted model
 
 ### Minit OSS
-Free and self-hostable:
+
+Free and open source:
+
 - CLI / local agent
-- Relay server
-- Local configuration
-- Basic invite / token access
-- Basic request logs
+- self-hostable relay
+- local configuration
+- basic access control
+- basic logs
+
+This should be enough for anyone to understand Minit, run it themselves, and build on top of it.
 
 ### Minit Cloud
-Paid convenience:
-- Managed relay
-- Stable `*.minit.run` URLs
-- Identity / invite management
-- Usage dashboard
-- Longer log retention
-- Managed updates
+
+Paid when convenience starts to matter:
+
+- managed relay
+- stable `*.minit.run` URLs
+- custom domains
+- identity and invite management
+- longer log retention
+- managed secrets/configuration
+- **one-click move from PC to managed compute**
 
 ### Minit Enterprise
-Paid control:
-- Company SSO / OIDC
-- Domain allowlists
-- Central app registry
-- Security policy templates
-- Audit logs
-- Private/company relay
-- App ownership and offboarding
-- Admin kill switch
 
-The model is intentionally similar to successful open-source infrastructure businesses: make the core easy to adopt and self-host, then charge for operating the shared control plane and enterprise controls.
+For organizations that want the same lightweight deployment model with central control:
+
+- SSO / OIDC
+- company-only access
+- security policies
+- central app registry
+- audit logs
+- private relay
+- app ownership/offboarding
+- admin kill switch
 
 ## What Minit is not
 
-Minit is not intended to replace production cloud infrastructure.
+Minit is not trying to make your laptop an internet-scale production server.
 
-Use something else when you need:
+Local mode is intentionally optimized for experimentation and small usage.
+
+Move to managed infrastructure when you need:
+
 - 24×7 availability
-- high traffic
-- strong SLA
-- internet-scale public services
-- regulated production workloads requiring formal infrastructure controls
+- more traffic than your PC comfortably handles
+- production SLA
+- stronger operational controls
+- always-on background workloads
 
-Minit exists so every useful 5-person tool does **not** have to start as a production IT project.
+The important part is that **you should not have to solve those problems before you have users.**
 
 ## Roadmap
 
-### v0.1 — Local → Link
-- [ ] `minit run --port <port>`
-- [ ] outbound HTTP tunnel
-- [ ] generated team URL
-- [ ] access token / invite
-- [ ] basic request log
+### v0.1 — Local app → live URL
 
-### v0.2 — Team-ready
-- [ ] email/domain allowlist
-- [ ] local app registry
-- [ ] restart/reconnect
-- [ ] simple dashboard
-- [ ] Windows/macOS packages
+- [ ] `minit run`
+- [ ] automatic local port detection
+- [ ] encrypted outbound tunnel
+- [ ] generated `*.minit.run` URL
+- [ ] basic access token / invite
+- [ ] basic request and error logs
+- [ ] macOS / Windows support
 
-### v0.3 — Enterprise-ready
+### v0.2 — Zero-config AI app publishing
+
+- [ ] detect Python / Node projects
+- [ ] detect common AI app frameworks
+- [ ] environment variable / secret detection
+- [ ] app manifest generated automatically
+- [ ] stable app identity and URL
+- [ ] simple web dashboard
+
+### v0.3 — Local → Managed
+
+- [ ] `minit move --managed`
+- [ ] automatic dependency packaging
+- [ ] secrets/config migration
+- [ ] persistent URL and app identity
+- [ ] managed runtime
+- [ ] rollback to local / previous version
+
+### Later — Teams & Enterprise
+
+- [ ] email/domain allowlists
 - [ ] OIDC / SSO
-- [ ] organization policy
+- [ ] organization policies
 - [ ] audit logging
-- [ ] centrally managed relay
-- [ ] admin app inventory / kill switch
+- [ ] private/company relay
+- [ ] organization-wide app inventory
+
+## The thesis
+
+AI coding is unbundling software development from professional software engineering teams.
+
+The next bottleneck is deployment.
+
+A person who can create a useful application in an afternoon should not need to become a cloud engineer before showing it to ten users.
+
+**Minit makes the user's own computer the first deployment platform — and provides the easiest path to managed hosting when the application grows.**
 
 ## Status
 
-Early concept / prototype. The first goal is deliberately small:
+Early concept / prototype.
 
-> **Make a web app running on one PC usable by 5–10 people through one secure link.**
+The first milestone is deliberately small:
+
+> **Take an AI-built web app running on one PC and make it usable by real users through one command and one link.**
 
 ## License
 
