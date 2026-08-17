@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "minit-runtime"
 version = "0.0.1"
-description = "Publish small apps from your own computer."
+description = "From localhost to real users in one command."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
@@ -16,8 +16,14 @@ dependencies = [
   "httpx>=0.27",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 minit = "minit.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["minit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
