@@ -1,5 +1,0 @@
-PASS
-package=minit-runtime
-version=0.1.0
-install=pypi
-e2e=external-public-url
