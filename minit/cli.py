@@ -12,12 +12,20 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
-from minit.state import create_manifest, ensure_manifest, load_manifest, manifest_path
+from minit.state import (
+    create_manifest,
+    ensure_manifest,
+    load_manifest,
+    manifest_path,
+    record_publish_start,
+    record_publish_stop,
+)
 
 app = typer.Typer(no_args_is_help=True, help="Publish local apps from your own computer.")
 console = Console()
@@ -173,6 +181,26 @@ def _wait_for_public_url(url: str, attempts: int = 12, delay_seconds: float = 1.
     return False
 
 
+def _record_publish_started() -> datetime | None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        record_publish_start(started_at=started_at)
+        return started_at
+    except Exception:
+        # Local history must never block the core publish flow.
+        return None
+
+
+def _record_publish_stopped(started_at: datetime | None) -> None:
+    if started_at is None:
+        return
+    try:
+        record_publish_stop(started_at)
+    except Exception:
+        # Local history is best-effort and is never telemetry.
+        pass
+
+
 def _start_quick_tunnel(port: int) -> None:
     binary = _cloudflared_path(auto_install=True)
     if not binary:
@@ -197,6 +225,7 @@ def _start_quick_tunnel(port: int) -> None:
     )
 
     published_url: str | None = None
+    publish_started_at: datetime | None = None
     try:
         assert process.stdout is not None
         for line in process.stdout:
@@ -208,6 +237,7 @@ def _start_quick_tunnel(port: int) -> None:
 
                 console.print()
                 if ready:
+                    publish_started_at = _record_publish_started()
                     console.print(f"[bold green]✓ Live URL:[/bold green] {published_url}")
                 else:
                     console.print(f"[bold yellow]✓ URL created:[/bold yellow] {published_url}")
@@ -233,6 +263,8 @@ def _start_quick_tunnel(port: int) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
         console.print("[green]✓ Link closed.[/green]")
+    finally:
+        _record_publish_stopped(publish_started_at)
 
 
 @app.command()
