@@ -1,97 +1,136 @@
 # Minit Business Model
 
-Minit follows an open-source + hosted model inspired by successful developer infrastructure companies such as Supabase.
+Minit should monetize only after the user's app has earned the need for infrastructure.
 
-The principle is simple:
+> **Launch first. Pay when it matters.**
 
-> **Make the core useful for free. Charge for operating the parts users no longer want to operate themselves.**
+The core journey is intentionally simple:
+
+```text
+AI coding / local app
+        ↓
+     minit run
+        ↓
+ temporary public URL
+        ↓
+   real users try it
+        ↓
+"I need this to stay online"
+        ↓
+    minit deploy
+        ↓
+   Minit Managed
+```
 
 ## 1. Minit OSS — free
 
-The open-source core should remain genuinely useful:
+`minit run` remains genuinely useful without an account or payment.
 
-- `minit run`
-- local app discovery
-- local PC as compute
-- local app identity
-- basic shareable endpoint
-- self-hostable networking/relay components as they mature
+- run the app on your own PC
+- publish a temporary public URL
+- persistent local app identity
+- minimal setup and dependencies
+- no Minit account required
 
-A solo builder should be able to publish a small app without creating an account or paying Minit.
+The user's PC is the first server. If the experiment does not matter, they can stop it and pay nothing.
 
-## 2. Minit Cloud — hosted convenience
+## 2. The natural conversion moment
 
-The first paid layer should remove operational friction while the user's PC can still remain the compute:
+Minit should not ask users to upgrade merely because they installed the CLI.
 
-- stable `*.minit.run` URL
-- custom domains
-- app identity synced to the cloud
-- authentication / invite links
-- usage and error logs
-- analytics
-- managed relay
-- secrets and configuration sync
+Paid intent appears when real usage creates operational pain:
 
-This is the natural first monetization point: the app has real users, so a stable identity and better operations become valuable.
+- the PC must stay on
+- the temporary URL is no longer enough
+- the app needs predictable uptime
+- the builder wants authentication, logs, secrets, or a custom domain
 
-## 3. Minit Managed — managed compute
+The product language should describe the job, not the purchase:
 
-When the user's PC is no longer enough:
+> **Keep this app online.**
+
+> **Run without your PC.**
+
+The CLI transition should eventually be:
 
 ```bash
-minit move --managed
+minit deploy
 ```
 
-Minit should move the same application to managed compute while preserving its identity:
+Only at this point should account creation and payment become necessary.
 
-- same app
-- same URL
-- same users
-- same configuration
-- same secrets
-- same logs
+## 3. Minit Managed — paid
 
-The user pays because the app has earned the need for uptime and capacity.
+`minit deploy` should promote the same app from local runtime to managed runtime without forcing the user to rebuild or re-platform it.
 
-## 4. Minit Enterprise — later
+The first managed product should focus on:
 
-For companies where many employees create small applications:
+- always-on managed compute
+- stable URL
+- automatic restart / health checks
+- logs
+- secrets and configuration
+- simple authentication
+- custom domain support
 
-- SSO / OIDC
-- company-only access
-- app inventory
-- audit logs
-- security policies
-- private relay
-- ownership / offboarding
-- admin controls
-
-Enterprise is deliberately secondary to the solo-builder experience.
-
-## Product funnel
+The key promise is continuity:
 
 ```text
-Local OSS
-   ↓
-Real users
-   ↓
-Minit Cloud
-(stable URL, auth, logs)
-   ↓
-Minit Managed
-(always-on compute)
-   ↓
-Team / Enterprise
+same app ID
+same project
+same workflow
+runtime: local → managed
 ```
 
-Or more simply:
+The user is paying for operations they no longer want their laptop to provide.
 
-> **Local Free → Real Usage → Hosted Paid → Managed Paid**
+## 4. Enterprise — later
 
-## Why the local app identity matters
+Enterprise capabilities should be added only after the individual-builder workflow is proven.
 
-Every Minit project receives a persistent local app ID in `.minit/app.json`.
+Possible later capabilities:
 
-That identity is the bridge between open source and hosted services. The runtime can change from a laptop to managed infrastructure without forcing the user to recreate the application.
+- team ownership
+- SSO / OIDC
+- private networking
+- app inventory
+- audit logs
+- policy controls
+- offboarding and ownership transfer
 
-The moat is not the tunnel itself. The moat should become the **easiest lifecycle from localhost → real users → stable hosted app → managed app**, while preserving identity and minimizing infrastructure knowledge.
+These should not complicate the OSS product today.
+
+## Open-source / commercial boundary
+
+The public repository should remain the open-source local runtime and CLI.
+
+A future hosted control plane, managed compute orchestration, billing system, and commercial service operations can live behind a service API and do not need to be part of the open-source repository.
+
+This keeps the promise clear:
+
+- **Minit OSS:** localhost → real users
+- **Minit Managed:** real users → always online
+
+## Licensing strategy
+
+The OSS code is licensed under Apache License 2.0. This is intentionally permissive to reduce adoption friction.
+
+A future managed service can be governed by separate commercial service terms while continuing to use the Apache-licensed CLI and local runtime.
+
+Apache-2.0 does not create exclusivity around the source code. The durable advantage therefore needs to come from the product lifecycle, developer experience, managed service, ecosystem, trust, and brand — not from preventing forks.
+
+## Build gates
+
+Do not build the full managed platform merely because the business model is plausible.
+
+Advance when users create the signal:
+
+1. **OSS proof:** independent users successfully run `minit run`.
+2. **Repeat proof:** users use Minit for a second app or session.
+3. **Managed-intent proof:** users repeatedly ask for uptime, stable URLs, auth, or a way to run without their PC.
+4. **Paid beta:** implement the smallest `minit deploy` path that solves the dominant request.
+5. **Scale:** add reliability, billing, domains, auth, and team features only as usage requires them.
+
+The most important early metric is not stars. It is:
+
+> **How many people who are not the author successfully go from localhost → public URL → real user → repeat use?**
