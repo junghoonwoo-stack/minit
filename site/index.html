@@ -15,7 +15,7 @@
     <nav class="nav">
       <a class="brand" href="./" aria-label="Minit home">minit<span>.</span></a>
       <div class="nav-links">
-        <a href="https://github.com/junghoonwoo-stack/minit#install">Install</a>
+        <a href="#install">Install</a>
         <a href="https://github.com/junghoonwoo-stack/minit/issues">Feedback</a>
         <a href="https://github.com/junghoonwoo-stack/minit/blob/main/SECURITY.md">Security</a>
         <a class="github" href="https://github.com/junghoonwoo-stack/minit">GitHub ↗</a>
@@ -27,8 +27,8 @@
       <h1>From localhost to<br><span>real users</span> in one command.</h1>
       <p class="lede">Minit gives a web app already running on your computer a temporary public URL. No account. No cloud setup. Your app stays on your PC.</p>
       <div class="actions">
-        <a class="primary" href="https://github.com/junghoonwoo-stack/minit">View on GitHub</a>
-        <a class="secondary" href="#try">Try in one minute ↓</a>
+        <a class="primary" href="#install">Install Minit</a>
+        <a class="secondary" href="https://github.com/junghoonwoo-stack/minit">View on GitHub ↗</a>
       </div>
     </section>
 
@@ -51,6 +51,19 @@
       <article><span>03</span><h2>Stay in control</h2><p>Your computer provides the compute. Stop Minit and the temporary public path closes.</p></article>
     </section>
 
+    <section class="try" id="install">
+      <div>
+        <p class="eyebrow">INSTALL</p>
+        <h2>One package. One command.</h2>
+        <p>Install from PyPI with pipx or uv. The package is <code>minit-runtime</code>; the command is <code>minit</code>.</p>
+      </div>
+      <pre><code><span class="comment"># pipx</span>
+pipx install minit-runtime
+
+<span class="comment"># or uv</span>
+uv tool install minit-runtime</code></pre>
+    </section>
+
     <section class="flow">
       <p class="eyebrow">THE WHOLE IDEA</p>
       <div class="flowline"><b>Build</b><i>→</i><b>localhost</b><i>→</i><strong>minit run</strong><i>→</i><b>share</b><i>→</i><b>learn</b></div>
@@ -60,12 +73,12 @@
     <section class="try" id="try">
       <div>
         <p class="eyebrow">TRY IT</p>
-        <h2>One minute, two terminals.</h2>
-        <p>Use the included sample app, or point Minit at any local HTTP app.</p>
+        <h2>A tiny local page is enough.</h2>
+        <p>Create a throwaway page, start Python's built-in web server, then publish it with Minit.</p>
       </div>
       <pre><code><span class="comment"># terminal 1</span>
-cd examples/hello-minit
-python -m http.server 8000
+python -c "from pathlib import Path; p=Path('minit-demo'); p.mkdir(exist_ok=True); (p/'index.html').write_text('Hello from Minit')"
+python -m http.server 8000 --directory minit-demo
 
 <span class="comment"># terminal 2</span>
 minit run --port 8000</code></pre>
@@ -83,7 +96,7 @@ minit run --port 8000</code></pre>
     <section class="final-cta">
       <p class="eyebrow">MINIT</p>
       <h2>Your PC is the first server.</h2>
-      <a class="primary" href="https://github.com/junghoonwoo-stack/minit">Get started on GitHub ↗</a>
+      <a class="primary" href="#install">Install Minit</a>
     </section>
 
     <footer>
