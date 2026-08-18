@@ -1,0 +1,68 @@
+name: Live E2E smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install released Minit
+        run: |
+          python -m venv /tmp/minit-smoke
+          /tmp/minit-smoke/bin/pip install --no-cache-dir minit-runtime
+          /tmp/minit-smoke/bin/minit --help
+
+      - name: Start local app
+        run: |
+          mkdir -p /tmp/minit-demo
+          echo 'minit-live-smoke-ok' > /tmp/minit-demo/index.html
+          /tmp/minit-smoke/bin/python -m http.server 8000 --directory /tmp/minit-demo >/tmp/minit-http.log 2>&1 &
+          echo $! > /tmp/minit-http.pid
+
+      - name: Publish and verify external URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/minit-smoke/bin/minit run --port 8000 >/tmp/minit-live.log 2>&1 &
+          MINIT_PID=$!
+
+          cleanup() {
+            kill "$MINIT_PID" 2>/dev/null || true
+            kill "$(cat /tmp/minit-http.pid)" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          LIVE_URL=""
+          for i in $(seq 1 40); do
+            LIVE_URL=$(grep -Eo 'https://[A-Za-z0-9-]+\.trycloudflare\.com' /tmp/minit-live.log | head -1 || true)
+            if [ -n "$LIVE_URL" ]; then break; fi
+            sleep 2
+          done
+
+          if [ -z "$LIVE_URL" ]; then
+            cat /tmp/minit-live.log
+            exit 1
+          fi
+
+          for i in $(seq 1 30); do
+            if curl -fsS "$LIVE_URL" | grep -q 'minit-live-smoke-ok'; then
+              echo "Live E2E smoke test passed"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat /tmp/minit-live.log
+          exit 1
