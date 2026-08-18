@@ -53,7 +53,7 @@ def _detect_port() -> int | None:
 
 def _cache_dir() -> Path:
     root = Path(os.environ.get("MINIT_HOME", Path.home() / ".minit"))
-    return root / "bin"
+    return root / "bin" / CLOUDFLARED_VERSION
 
 
 def _cloudflared_asset() -> tuple[str, bool]:
