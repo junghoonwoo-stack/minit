@@ -260,10 +260,9 @@ Questions to validate before final pricing:
 
 ### Phase 1 — make OSS reliable
 
-- [ ] CI across supported operating systems
-- [ ] reliable first-run networking helper download
-- [ ] checksum/version verification for downloaded helper binary
-- [ ] tunnel readiness/retry before declaring the URL ready
+- [x] Add CI workflow for Linux, macOS, and Windows
+- [x] Pin and SHA256-verify the downloaded networking helper
+- [x] Retry public URL readiness before declaring the link live
 - [ ] packaging that does not require cloning the repository
 - [ ] collect structured user feedback without mandatory telemetry
 
@@ -271,8 +270,8 @@ Questions to validate before final pricing:
 
 ### Phase 2 — managed-ready local architecture
 
-- [ ] version the local app manifest
-- [ ] preserve backward compatibility
+- [x] version the local app manifest
+- [x] preserve backward compatibility for existing manifests
 - [ ] define deploy client/server protocol
 - [ ] project/framework detection
 - [ ] reproducible deployment bundle specification
