@@ -2,7 +2,7 @@
 
 All notable changes to Minit are documented here.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-08-18
 
 First public alpha focused on one workflow:
 
