@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import re
@@ -8,6 +9,8 @@ import socket
 import subprocess
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -21,7 +24,18 @@ console = Console()
 
 COMMON_PORTS = (3000, 5173, 8000, 8080, 8501, 8888)
 URL_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
-CLOUDFLARED_RELEASE_BASE = "https://github.com/cloudflare/cloudflared/releases/latest/download"
+
+# Pin the helper we execute on the user's machine and verify the downloaded
+# release asset before running it. Update these values together.
+CLOUDFLARED_VERSION = "2026.7.3"
+CLOUDFLARED_RELEASE_BASE = f"https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}"
+CLOUDFLARED_SHA256 = {
+    "cloudflared-windows-amd64.exe": "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841",
+    "cloudflared-darwin-amd64.tgz": "70d1c8684fa6d14b5843787ec8d1ea8e18b23650e424f4ea43d849a506487c3b",
+    "cloudflared-darwin-arm64.tgz": "90c5a4f914d705fd70c135dba6d80b1791d254b08d6d4136301941f88330dd09",
+    "cloudflared-linux-amd64": "9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17",
+    "cloudflared-linux-arm64": "65259e652a7bea08bf5df603233ab22b8bf3116af8df9f9206209af6a1b955c0",
+}
 
 
 def _port_open(port: int) -> bool:
@@ -65,8 +79,20 @@ def _cloudflared_asset() -> tuple[str, bool]:
     raise RuntimeError(f"Unsupported operating system: {system}")
 
 
+def _verify_sha256(path: Path, expected: str) -> bool:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().lower() == expected.lower()
+
+
 def _download_cloudflared(destination: Path) -> Path:
     asset, compressed = _cloudflared_asset()
+    expected_sha256 = CLOUDFLARED_SHA256.get(asset)
+    if expected_sha256 is None:
+        raise RuntimeError(f"No trusted checksum configured for {asset}.")
+
     url = f"{CLOUDFLARED_RELEASE_BASE}/{asset}"
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -75,6 +101,9 @@ def _download_cloudflared(destination: Path) -> Path:
     with tempfile.TemporaryDirectory(prefix="minit-") as tmp:
         downloaded = Path(tmp) / asset
         urllib.request.urlretrieve(url, downloaded)
+
+        if not _verify_sha256(downloaded, expected_sha256):
+            raise RuntimeError("Downloaded networking helper failed SHA256 verification.")
 
         if compressed:
             with tarfile.open(downloaded, "r:gz") as archive:
@@ -123,6 +152,27 @@ def _check_http(port: int) -> str:
         return "reachable"
 
 
+def _public_url_reachable(url: str) -> bool:
+    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "minit-readiness-check"})
+    try:
+        with urllib.request.urlopen(request, timeout=3.0):
+            return True
+    except urllib.error.HTTPError:
+        # DNS/TLS/routing succeeded. The app may intentionally return 4xx/5xx.
+        return True
+    except Exception:
+        return False
+
+
+def _wait_for_public_url(url: str, attempts: int = 12, delay_seconds: float = 1.0) -> bool:
+    for attempt in range(attempts):
+        if _public_url_reachable(url):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(delay_seconds)
+    return False
+
+
 def _start_quick_tunnel(port: int) -> None:
     binary = _cloudflared_path(auto_install=True)
     if not binary:
@@ -153,8 +203,15 @@ def _start_quick_tunnel(port: int) -> None:
             match = URL_RE.search(line)
             if match and not published_url:
                 published_url = match.group(0)
+                console.print("[yellow]→[/yellow] Waiting for public link to become reachable...")
+                ready = _wait_for_public_url(published_url)
+
                 console.print()
-                console.print(f"[bold green]✓ Live URL:[/bold green] {published_url}")
+                if ready:
+                    console.print(f"[bold green]✓ Live URL:[/bold green] {published_url}")
+                else:
+                    console.print(f"[bold yellow]✓ URL created:[/bold yellow] {published_url}")
+                    console.print("[yellow]  It may need a few more seconds before it is reachable.[/yellow]")
                 console.print("[green]✓ Compute:[/green]  this PC")
                 console.print("[green]✓ Status:[/green]   live while this terminal and PC stay on")
                 console.print()
