@@ -120,4 +120,4 @@ Minit의 첫 번째 목표는 단순합니다.
 
 ## License
 
-Apache License 2.0.
+[Apache License 2.0](LICENSE).
