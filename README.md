@@ -14,6 +14,20 @@ No account. No cloud setup. No separate server software.
 
 ## Install
 
+With `pipx`:
+
+```bash
+pipx install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+```
+
+Or with `uv`:
+
+```bash
+uv tool install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+```
+
+For development:
+
 ```bash
 git clone https://github.com/junghoonwoo-stack/minit.git
 cd minit
@@ -64,6 +78,8 @@ For the current MVP:
 
 Minit is currently intended for lightweight prototypes and early user testing, not sensitive or production workloads.
 
+Read the full [Security Policy](SECURITY.md).
+
 ## Why Minit?
 
 AI coding made building software much easier. Getting a local app in front of real users should be just as easy.
@@ -73,6 +89,8 @@ Build → launch → share → learn
 ```
 
 Minit is open source and focused first on making this local-to-live experience as simple as possible.
+
+For implementation details, see [Architecture](docs/ARCHITECTURE.md) and [Product Principles](docs/PRODUCT.md).
 
 ---
 
@@ -88,10 +106,16 @@ AI로 앱 개발 → 내 PC에서 실행 → minit run → URL 공유 → 실제
 
 ## 설치
 
+`pipx` 사용 시:
+
 ```bash
-git clone https://github.com/junghoonwoo-stack/minit.git
-cd minit
-pip install -e .
+pipx install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+```
+
+또는 `uv`:
+
+```bash
+uv tool install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
 ```
 
 ## 사용
