@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "minit-runtime"
-version = "0.0.4"
+version = "0.1.0"
 description = "From localhost to real users in one command."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/junghoonwoo-stack/minit"
+Homepage = "https://junghoonwoo-stack.github.io/minit/"
 Repository = "https://github.com/junghoonwoo-stack/minit"
 Issues = "https://github.com/junghoonwoo-stack/minit/issues"
 
