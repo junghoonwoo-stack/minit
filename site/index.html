@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Minit — From localhost to real users</title>
+  <meta name="description" content="Minit turns a locally running web app into a temporary public URL. Your PC is the first server.">
+  <meta name="theme-color" content="#0b0d10">
+  <meta property="og:title" content="Minit — From localhost to real users">
+  <meta property="og:description" content="Run one command. Share your local app. Your PC is the first server.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <nav class="nav">
+      <a class="brand" href="./" aria-label="Minit home">minit<span>.</span></a>
+      <div class="nav-links">
+        <a href="https://github.com/junghoonwoo-stack/minit#install">Install</a>
+        <a href="https://github.com/junghoonwoo-stack/minit/blob/main/SECURITY.md">Security</a>
+        <a class="github" href="https://github.com/junghoonwoo-stack/minit">GitHub ↗</a>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <p class="eyebrow">OPEN SOURCE · APACHE 2.0</p>
+      <h1>From localhost to<br><span>real users</span> in one command.</h1>
+      <p class="lede">Minit gives a web app already running on your computer a temporary public URL. No account. No cloud setup. Your app stays on your PC.</p>
+      <div class="actions">
+        <a class="primary" href="https://github.com/junghoonwoo-stack/minit">View on GitHub</a>
+        <a class="secondary" href="#try">Try in one minute ↓</a>
+      </div>
+    </section>
+
+    <section class="terminal-wrap" aria-label="Minit terminal example">
+      <div class="terminal-head"><span></span><span></span><span></span><b>terminal</b></div>
+      <pre><code><span class="dim">$</span> minit run --port 8000
+
+<span class="ok">✓</span> Local app:  http://127.0.0.1:8000
+<span class="ok">✓</span> Ready:      public URL is reachable
+<span class="ok">✓</span> Live URL:   https://example.trycloudflare.com
+<span class="ok">✓</span> Compute:    this PC
+
+<span class="bright">Send the URL to your users.</span>
+<span class="dim">Press Ctrl+C to stop publishing.</span></code></pre>
+    </section>
+
+    <section class="promise-grid">
+      <article><span>01</span><h2>Keep your stack</h2><p>If it already works on localhost, Minit works around it. No framework migration.</p></article>
+      <article><span>02</span><h2>Skip the setup</h2><p>No account, DNS, server, or cloud project just to show someone a prototype.</p></article>
+      <article><span>03</span><h2>Stay in control</h2><p>Your computer provides the compute. Stop Minit and the temporary public path closes.</p></article>
+    </section>
+
+    <section class="flow">
+      <p class="eyebrow">THE WHOLE IDEA</p>
+      <div class="flowline"><b>Build</b><i>→</i><b>localhost</b><i>→</i><strong>minit run</strong><i>→</i><b>share</b><i>→</i><b>learn</b></div>
+      <p>AI coding made building small software cheap. Getting it in front of another person should be just as lightweight.</p>
+    </section>
+
+    <section class="try" id="try">
+      <div>
+        <p class="eyebrow">TRY IT</p>
+        <h2>One minute, two terminals.</h2>
+        <p>Use the included sample app, or point Minit at any local HTTP app.</p>
+      </div>
+      <pre><code><span class="comment"># terminal 1</span>
+cd examples/hello-minit
+python -m http.server 8000
+
+<span class="comment"># terminal 2</span>
+minit run --port 8000</code></pre>
+    </section>
+
+    <section class="security">
+      <div>
+        <p class="eyebrow">SECURITY</p>
+        <h2>Public means public.</h2>
+      </div>
+      <p>Minit changes the security boundary of your local app. Treat every generated URL as public. Do not expose secrets, private files, personal data, or sensitive company data. Minit is currently for prototypes, demos, and early user testing — not sensitive or production workloads.</p>
+      <a href="https://github.com/junghoonwoo-stack/minit/blob/main/SECURITY.md">Read the security policy →</a>
+    </section>
+
+    <section class="final-cta">
+      <p class="eyebrow">MINIT</p>
+      <h2>Your PC is the first server.</h2>
+      <a class="primary" href="https://github.com/junghoonwoo-stack/minit">Get started on GitHub ↗</a>
+    </section>
+
+    <footer>
+      <span>Minit · Open source under Apache License 2.0</span>
+      <a href="https://github.com/junghoonwoo-stack/minit">github.com/junghoonwoo-stack/minit</a>
+    </footer>
+  </main>
+</body>
+</html>
