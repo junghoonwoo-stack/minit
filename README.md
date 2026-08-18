@@ -19,14 +19,16 @@ No account. No cloud setup. No separate server software.
 With `pipx`:
 
 ```bash
-pipx install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+pipx install minit-runtime
 ```
 
 Or with `uv`:
 
 ```bash
-uv tool install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+uv tool install minit-runtime
 ```
+
+The Python package is named `minit-runtime`; the command is simply `minit`.
 
 For development:
 
@@ -54,9 +56,11 @@ Minit returns a public URL. Send it to users. Keep your PC on while the app is b
 
 ## Try it in one minute
 
+In one terminal, start a tiny local page:
+
 ```bash
-cd examples/hello-minit
-python -m http.server 8000
+python -c "from pathlib import Path; p=Path('minit-demo'); p.mkdir(exist_ok=True); (p/'index.html').write_text('Hello from Minit')"
+python -m http.server 8000 --directory minit-demo
 ```
 
 In another terminal:
@@ -111,14 +115,16 @@ AI로 앱 개발 → 내 PC에서 실행 → minit run → URL 공유 → 실제
 `pipx` 사용 시:
 
 ```bash
-pipx install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+pipx install minit-runtime
 ```
 
 또는 `uv`:
 
 ```bash
-uv tool install https://github.com/junghoonwoo-stack/minit/archive/refs/heads/main.zip
+uv tool install minit-runtime
 ```
+
+Python 패키지 이름은 `minit-runtime`이고, 실행 명령은 `minit`입니다.
 
 ## 사용
 
