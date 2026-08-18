@@ -1,8 +1,9 @@
+import hashlib
 from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from minit.cli import URL_RE, _cloudflared_asset, _detect_port, app
+from minit.cli import URL_RE, _cloudflared_asset, _detect_port, _verify_sha256, _wait_for_public_url, app
 
 runner = CliRunner()
 
@@ -37,3 +38,19 @@ def test_doctor_says_networking_will_prepare_automatically():
 def test_cloudflared_asset_for_macos_arm64():
     with patch("minit.cli.platform.system", return_value="Darwin"), patch("minit.cli.platform.machine", return_value="arm64"):
         assert _cloudflared_asset() == ("cloudflared-darwin-arm64.tgz", True)
+
+
+def test_verify_sha256(tmp_path):
+    downloaded = tmp_path / "helper"
+    downloaded.write_bytes(b"minit")
+    expected = hashlib.sha256(b"minit").hexdigest()
+
+    assert _verify_sha256(downloaded, expected)
+    assert not _verify_sha256(downloaded, "0" * 64)
+
+
+def test_wait_for_public_url_retries_until_reachable():
+    with patch("minit.cli._public_url_reachable", side_effect=[False, False, True]), patch("minit.cli.time.sleep") as sleep:
+        assert _wait_for_public_url("https://example.test", attempts=3, delay_seconds=0.01)
+
+    assert sleep.call_count == 2
