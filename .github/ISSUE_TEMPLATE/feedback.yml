@@ -1,0 +1,53 @@
+name: Product feedback
+description: Tell us what felt easy, confusing, or missing while trying Minit.
+title: "[Feedback] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Minit is still early. Short, concrete feedback is especially useful — including "I expected this to work differently."
+
+  - type: input
+    id: app
+    attributes:
+      label: What did you build?
+      placeholder: "e.g. a Streamlit dashboard made with Claude Code"
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Did you get a public URL that another device could open?
+      options:
+        - Yes, on the first try
+        - Yes, after some troubleshooting
+        - No
+        - I did not get that far
+    validations:
+      required: true
+
+  - type: textarea
+    id: friction
+    attributes:
+      label: What was the most confusing or annoying part?
+      placeholder: "One specific moment is more useful than a general review."
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect Minit to do next?
+      description: This helps us understand the natural next step in the workflow without assuming what features people need.
+
+  - type: dropdown
+    id: repeat
+    attributes:
+      label: Would you use Minit again for another prototype?
+      options:
+        - Yes
+        - Maybe
+        - No
+
+  - type: textarea
+    id: other
+    attributes:
+      label: Anything else?
