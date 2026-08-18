@@ -12,6 +12,8 @@ Your app keeps running on your own PC. Minit gives it a shareable URL.
 
 No account. No cloud setup. No separate server software.
 
+**Website:** https://junghoonwoo-stack.github.io/minit/
+
 ## Install
 
 With `pipx`:
