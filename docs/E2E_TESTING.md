@@ -1,6 +1,6 @@
 # Minit E2E testing notes
 
-This document records what we learned from the first real end-to-end test of Minit.
+This document records what we learned from real end-to-end tests of Minit.
 
 ## What was validated
 
@@ -15,6 +15,22 @@ start local web app
 ```
 
 The test page returned successfully through the generated public URL, confirming that the MVP works end to end.
+
+## Release 0.1.0 verification
+
+After publishing `minit-runtime==0.1.0` to PyPI, a clean GitHub-hosted Linux runner successfully completed this path:
+
+```text
+fresh Python 3.12 environment
+→ install minit-runtime==0.1.0 from PyPI
+→ verify the minit CLI
+→ start a local HTTP app
+→ minit run --port 8000
+→ receive a public URL
+→ fetch the expected page through that public URL
+```
+
+This verifies the public package-install path as well as the external live path for the 0.1.0 release.
 
 ## Important observations
 
@@ -58,4 +74,4 @@ Keep these tests separate from normal unit tests because they depend on external
 
 ## Current scope
 
-This validates the current MVP transport and CLI flow. It does not yet validate stable URLs, authentication, custom domains, or long-running reliability.
+This validates the current MVP transport, CLI flow, and the PyPI package-install path. It does not yet validate stable URLs, authentication, custom domains, or long-running reliability.
