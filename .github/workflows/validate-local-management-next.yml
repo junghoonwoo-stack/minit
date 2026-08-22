@@ -1,0 +1,88 @@
+name: Validate local management next
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-local-management-next.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tests and local rollback smoke
+        shell: bash
+        run: |
+          LOG=/tmp/minit-next-validation.txt
+          : > "$LOG"
+          exec > >(tee -a "$LOG") 2>&1
+          set +e
+
+          python -m pip install -e ".[dev]"
+          install_rc=$?
+          pytest -q
+          test_rc=$?
+
+          rollback_rc=99
+          data_ok=1
+          perms_ok=1
+          cli_ok=1
+
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ]; then
+            rm -rf /tmp/minit-rollback-e2e
+            mkdir -p /tmp/minit-rollback-e2e
+            cd /tmp/minit-rollback-e2e
+            printf "print('v1')\n" > app.py
+            mkdir -p .minit/data
+            printf "DATA-V1\n" > .minit/data/state.db
+
+            minit snapshot create --label v1 | tee /tmp/snapshot-create.txt
+            snapshot_id=$(minit snapshot list | head -1 | awk '{print $1}')
+            printf "print('v2')\n" > app.py
+            printf "DATA-V2\n" > .minit/data/state.db
+            minit rollback "$snapshot_id"
+            rollback_rc=$?
+
+            grep -q "v1" app.py
+            code_ok=$?
+            grep -q "DATA-V2" .minit/data/state.db
+            data_ok=$?
+
+            if [ "$(stat -c '%a' .minit)" != "700" ]; then perms_ok=1; else perms_ok=0; fi
+            if [ "$(stat -c '%a' .minit/app.json)" != "600" ]; then perms_ok=1; fi
+            if [ "$(stat -c '%a' .minit/snapshots/index.json)" != "600" ]; then perms_ok=1; fi
+
+            minit --help | grep -q rollback && minit autostart --help >/dev/null && minit snapshot --help >/dev/null
+            cli_ok=$?
+          else
+            code_ok=1
+          fi
+
+          echo "install_rc=$install_rc"
+          echo "test_rc=$test_rc"
+          echo "rollback_rc=$rollback_rc"
+          echo "code_ok=$code_ok"
+          echo "data_ok=$data_ok"
+          echo "perms_ok=$perms_ok"
+          echo "cli_ok=$cli_ok"
+
+          result=failure
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$rollback_rc" -eq 0 ] && [ "$code_ok" -eq 0 ] && [ "$data_ok" -eq 0 ] && [ "$perms_ok" -eq 0 ] && [ "$cli_ok" -eq 0 ]; then
+            result=success
+          fi
+          echo "result=$result"
+
+          cd "$GITHUB_WORKSPACE"
+          cp "$LOG" local-management-next-validation.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add local-management-next-validation.txt
+          git commit -m "Record local management next validation" || true
+          git push
