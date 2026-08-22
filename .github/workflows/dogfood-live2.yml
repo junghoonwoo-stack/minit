@@ -1,0 +1,76 @@
+name: Live Minit dogfood 2
+
+on:
+  push:
+    branches: [main]
+    paths: ["dogfood-kick.txt"]
+
+permissions:
+  contents: write
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Install current Minit main
+        run: |
+          python -m pip install -e .
+          minit --help >/dev/null
+      - name: Create local apps
+        shell: bash
+        run: |
+          mkdir -p /tmp/minit-dogfood/dashboard /tmp/minit-dogfood/map
+          cat >/tmp/minit-dogfood/dashboard/index.html <<'EOF'
+          <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Minit Dashboard</title><style>body{margin:0;background:#0b1020;color:#eef3ff;font:15px system-ui}.w{max-width:1000px;margin:auto;padding:35px}h1{font-size:38px}.tag{color:#77a4ff;font-weight:800}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.c,.p{background:#121a31;border:1px solid #263452;border-radius:15px;padding:18px}.v{font-size:30px;font-weight:800}.bars{height:280px;display:flex;align-items:end;gap:10px}.b{flex:1;background:#678cff;border-radius:7px 7px 2px 2px;transition:.5s}.live{color:#70dc9b}@media(max-width:700px){.cards{grid-template-columns:1fr 1fr}}</style><div class=w><div class=tag>MINIT · LIVE LOCAL APP</div><h1>Operations Dashboard</h1><p>This page is served by an app deployed on a clean PC with <b>minit deploy</b>.</p><div class=cards><div class=c>ACTIVE USERS<div class=v id=u>—</div><span class=live>● live</span></div><div class=c>ORDERS/MIN<div class=v id=o>—</div></div><div class=c>REVENUE<div class=v id=r>—</div></div><div class=c>ERROR RATE<div class=v id=e>—</div></div></div><div class=p style="margin-top:14px"><b>LIVE ACTIVITY</b><div class=bars id=bars></div></div></div><script>let a=[30,42,55,49,65,72,61,82,77,88,69,91];function t(){a.shift();a.push(35+Math.random()*60);bars.innerHTML=a.map(x=>'<div class=b style="height:'+x+'%"></div>').join('');u.textContent=(1400+Math.random()*180|0).toLocaleString();o.textContent=35+Math.random()*20|0;r.textContent='₩'+(126+Math.random()*5).toFixed(1)+'M';e.textContent=(.1+Math.random()*.2).toFixed(2)+'%'}setInterval(t,1500);t()</script>
+          EOF
+          cat >/tmp/minit-dogfood/map/index.html <<'EOF'
+          <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Minit Live Map</title><style>body{margin:0;background:#07151b;color:#e8f6f8;font:15px system-ui}.w{max-width:1000px;margin:auto;padding:30px}h1{font-size:36px}.tag{color:#57d3b5;font-weight:800}.map{height:600px;position:relative;background:#0d2831;border:1px solid #31525c;border-radius:18px;overflow:hidden}.map:before{content:'';position:absolute;left:-5%;top:47%;width:110%;height:45px;background:#123e5f;transform:rotate(3deg)}.road{position:absolute;height:5px;background:#31525c;width:100%;top:28%;transform:rotate(-8deg)}.road.r2{top:70%;transform:rotate(12deg)}.road.r3{width:5px;height:100%;left:48%;top:0;transform:rotate(7deg)}.place{position:absolute;color:#789aa2;font-size:18px}.m{position:absolute;transition:1.2s linear;transform:translate(-50%,-50%)}.dot{width:17px;height:17px;background:#38d2ae;border:3px solid #c3fff0;border-radius:50%;box-shadow:0 0 18px #38d2ae}.lbl{position:absolute;left:14px;top:-7px;white-space:nowrap;background:#07151bd9;padding:4px 7px;border:1px solid #31525c;border-radius:7px;font-size:11px}.live{color:#71e5a0}</style><div class=w><div class=tag>MINIT · LIVE LOCATION DEMO</div><h1>Seoul Metro Fleet</h1><p>Five simulated units. <span class=live>● positions update every 1.2 seconds</span>. No real location data.</p><div class=map id=map><div class=road></div><div class="road r2"></div><div class="road r3"></div><span class=place style="left:16%;top:18%">Goyang</span><span class=place style="left:48%;top:36%">Seoul</span><span class=place style="left:76%;top:23%">Guri</span><span class=place style="left:20%;top:77%">Bucheon</span><span class=place style="left:63%;top:78%">Seongnam</span></div></div><script>let p=[[42,34],[55,48],[31,69],[73,32],[67,72]];p.forEach((x,i)=>{let d=document.createElement('div');d.className='m';d.id='m'+i;d.innerHTML='<div class=dot></div><div class=lbl>M-0'+(i+1)+' · en route</div>';map.appendChild(d)});function t(){p=p.map(x=>[Math.max(8,Math.min(92,x[0]+(Math.random()-.5)*7)),Math.max(9,Math.min(90,x[1]+(Math.random()-.5)*7))]);p.forEach((x,i)=>{let d=document.getElementById('m'+i);d.style.left=x[0]+'%';d.style.top=x[1]+'%'})}setInterval(t,1200);t()</script>
+          EOF
+      - name: Deploy locally with Minit
+        run: |
+          set -e
+          (cd /tmp/minit-dogfood/dashboard && minit deploy -p 8821 -- python -m http.server 8821 --bind 127.0.0.1)
+          (cd /tmp/minit-dogfood/map && minit deploy -p 8822 -- python -m http.server 8822 --bind 127.0.0.1)
+          curl -fsS http://127.0.0.1:8821 | grep -q 'Operations Dashboard'
+          curl -fsS http://127.0.0.1:8822 | grep -q 'Seoul Metro Fleet'
+      - name: Share both local apps through Minit
+        shell: bash
+        run: |
+          set -e
+          (cd /tmp/minit-dogfood/dashboard && minit run -p 8821 >/tmp/dash.log 2>&1) &
+          (cd /tmp/minit-dogfood/map && minit run -p 8822 >/tmp/map.log 2>&1) &
+          python - <<'PY'
+          import pathlib,re,time,sys
+          pat=re.compile(r'https://[\w-]+\.trycloudflare\.com')
+          out={}; files={'dashboard':'/tmp/dash.log','map':'/tmp/map.log'}
+          end=time.time()+150
+          while time.time()<end and len(out)<2:
+              for n,f in files.items():
+                  if n in out: continue
+                  p=pathlib.Path(f)
+                  if p.exists():
+                      m=pat.search(p.read_text(errors='ignore'))
+                      if m: out[n]=m.group(0)
+              time.sleep(2)
+          print(out)
+          if len(out)<2:
+              print(pathlib.Path('/tmp/dash.log').read_text(errors='ignore'))
+              print(pathlib.Path('/tmp/map.log').read_text(errors='ignore'))
+              sys.exit(1)
+          pathlib.Path('/tmp/dash.url').write_text(out['dashboard']); pathlib.Path('/tmp/map.url').write_text(out['map'])
+          PY
+          curl -fsS --retry 10 --retry-delay 2 "$(cat /tmp/dash.url)" | grep -q 'Operations Dashboard'
+          curl -fsS --retry 10 --retry-delay 2 "$(cat /tmp/map.url)" | grep -q 'Seoul Metro Fleet'
+      - name: Publish URLs
+        run: |
+          DASH=$(cat /tmp/dash.url); MAP=$(cat /tmp/map.url); NOW=$(date -u +'%Y-%m-%d %H:%M UTC')
+          printf '# Minit live dogfood URLs\n\nGenerated: **%s**\n\n- **Live Data Dashboard:** %s\n- **Live Location Map:** %s\n\nBoth passed: `minit deploy -> localhost verification -> minit run -> public URL verification`.\n\nThese temporary URLs remain live while this GitHub-hosted local machine is running (about 30 minutes after publication).\n' "$NOW" "$DASH" "$MAP" > dogfood-live-urls.md
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add dogfood-live-urls.md && git commit -m 'Publish temporary Minit dogfood URLs' && git push
+      - name: Keep the local PC alive
+        run: sleep 1800
