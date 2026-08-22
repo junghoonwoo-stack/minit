@@ -1,38 +1,91 @@
 # Minit
 
-**From localhost to real users in one command.**
+**Deploy software to your own computer. Manage it like the cloud.**
 
-> **Your PC is the first server.**
+> **Your PC is the server.**
 
-Minit is an open-source local-first tool for people who build apps with Claude Code, Codex, Cursor, or other AI coding tools.
+Minit is an open-source local-first runtime and management tool for apps built with Claude Code, Codex, Cursor, or any other coding workflow.
 
-Today, Minit makes an app already running on your computer reachable through a shareable URL. The direction is broader: make local software easy to run, observe, version, back up, share, and move **without making cloud compute the default runtime**.
+AI coding makes it easy to create software locally. Minit is for the next step: **keep that software running on the computer you already own, without moving the app into cloud compute.**
 
-Your application process and compute stay on your own machine.
+```text
+AI builds the app
+      ↓
+minit deploy
+      ↓
+your PC keeps it running
+      ↓
+monitor · restart · version · backup · manage
+      ↓
+optionally share it with other people
+```
+
+**Application code, data, secrets, keys, and compute stay local.** Optional Minit cloud services are for administration, aggregate operational metadata, and encrypted backup storage — not application hosting.
 
 ![Minit demo](assets/demo.svg)
 
-No account. No cloud compute setup. No separate app server.
+No app upload. No cloud compute required for the app runtime. No separate server to provision.
 
 **Website:** https://junghoonwoo-stack.github.io/minit/
 
+> **Release note:** PyPI `0.1.0` currently provides the temporary `minit run` sharing workflow. Persistent local `minit deploy` and the local manager are on development `main` / `0.2.0.dev0` and are not yet in the stable PyPI release.
+
+## The two modes
+
+### `minit deploy` — keep it running on this computer
+
+Development `main` supports:
+
+```bash
+minit deploy --port 8000 -- python app.py
+```
+
+Minit starts a detached local supervisor. The terminal can close and the app continues to run **on this PC**.
+
+```bash
+minit status
+minit logs
+minit restart
+minit stop
+```
+
+The local manager handles health checks, crash restart, CPU/RAM monitoring, local secrets, snapshots/rollback, encrypted data backup, recovery, and user-level autostart.
+
+`minit deploy` means:
+
+> **Keep this app running on my computer.**
+
+It does **not** mean:
+
+> Upload this app to Minit cloud.
+
+### `minit run` — temporarily share what is already running
+
+The stable `0.1.0` release supports:
+
+```bash
+minit run --port 8000
+```
+
+Minit creates a temporary public URL to an app already running locally. The app process and compute remain on your computer. Stop the command and the temporary public path closes.
+
 ## Install
 
-With `pipx`:
+Stable PyPI release:
 
 ```bash
 pipx install minit-runtime
 ```
 
-Or with `uv`:
+or:
 
 ```bash
 uv tool install minit-runtime
 ```
 
-The Python package is named `minit-runtime`; the command is simply `minit`.
+The Python package is named `minit-runtime`; the command is `minit`.
 
-For development:
+To try the current local-manager development version:
 
 ```bash
 git clone https://github.com/junghoonwoo-stack/minit.git
@@ -40,25 +93,77 @@ cd minit
 pip install -e .
 ```
 
-## Use
+## Why local deployment?
 
-Run your app locally, then:
+Small AI-built software often does not need a datacenter. A tool used by 3, 10, or 30 people can often run perfectly well on an existing laptop, desktop, workstation, mini PC, or team machine.
 
-```bash
-minit run
+The difficult part is not compute. The difficult part is everything around it:
+
+- keeping the app alive after the terminal closes
+- restarting it after failure or login
+- monitoring CPU, memory, health, and usage
+- handling secrets safely
+- recovering from a bad AI edit
+- backing up mutable data
+- controlling access and connectivity
+- managing many small apps without becoming a server administrator
+
+Minit brings those cloud-like operational conveniences **to the local machine**.
+
+```text
+Cloud deployment
+code → somebody else's compute → managed there
+
+Minit
+code → your compute → managed there
 ```
 
-Or specify the port:
+## Local authority, optional cloud administration
 
-```bash
-minit run --port 8501
+The architecture is intentionally asymmetric:
+
+```text
+YOUR COMPUTER
+  code
+  data
+  secrets
+  encryption keys
+  app process
+  local database/files
+        │
+        │ only allowlisted operational metadata
+        │ and already-encrypted backup ciphertext
+        ▼
+OPTIONAL MINIT CLOUD
+  fleet/admin view
+  health statistics
+  alerts
+  blind encrypted backup storage
 ```
 
-Minit returns a public URL. Send it to users. Keep your PC on while the app is being used. Press `Ctrl+C` to stop.
+A Minit-operated server should not need plaintext application code, application data, prompts, raw logs, secrets, or decryption keys.
 
-## Try it in one minute
+Development `main` includes:
 
-In one terminal, start a tiny local page:
+```bash
+minit cloud preview
+```
+
+which prints the complete cleartext payload currently eligible for cloud administration. See [Cloud Admin Privacy](docs/CLOUD_ADMIN_PRIVACY.md).
+
+## Private by architecture
+
+Minit's target security invariant is:
+
+> **Compromising Minit-operated infrastructure must not be sufficient to read protected app/data/backup content or gain privileged control of the local runtime.**
+
+Remote infrastructure can still be attacked for availability and may observe deliberately retained minimal operational metadata. Minit does not claim complete zero-knowledge guarantees until sandboxing and end-to-end remote-control/connectivity work is implemented and reviewed.
+
+See [Threat Model](docs/THREAT_MODEL.md), [Architecture](docs/ARCHITECTURE.md), and [Product Principles](docs/PRODUCT.md).
+
+## Try the released sharing flow in one minute
+
+In one terminal:
 
 ```bash
 python -c "from pathlib import Path; p=Path('minit-demo'); p.mkdir(exist_ok=True); (p/'index.html').write_text('Hello from Minit')"
@@ -73,97 +178,71 @@ minit run --port 8000
 
 Open the generated URL from another device.
 
-## Local-first direction
+## Current development focus
 
-Minit's architectural direction is:
+The near-term goal is deliberately narrow:
 
-```text
-Your machine
-  app · data · secrets · keys · compute
-             │
-             ▼
-      Minit Local Manager
-  run · connect · protect · observe
-  version · backup · share · move
-             │
-             ▼
- optional encrypted coordination / relay
-```
+> **Make local app deployment private, simple, and boringly reliable.**
 
-The local machine remains authoritative. Future remote coordination services should not require possession of application plaintext or decryption keys.
-
-This is a design direction, not a claim that all of those management and encryption features are implemented today. See [Architecture](docs/ARCHITECTURE.md) and [Product Principles](docs/PRODUCT.md).
-
-## Security — MVP
-
-`minit run` makes your local app reachable from the public internet. Treat the generated URL as public.
-
-For the current MVP:
-
-- Do not expose apps containing secrets, private files, personal data, or sensitive company data.
-- Do not rely on the URL itself as authentication.
-- If your app needs access control, add authentication in the app before publishing it.
-- Review AI-generated apps for hard-coded API keys, debug endpoints, and unintended file/data access before sharing them.
-
-Minit is currently intended for lightweight prototypes and early user testing, not sensitive or production workloads.
-
-Read the full [Security Policy](SECURITY.md).
-
-## Why Minit?
-
-AI coding made building software much easier. Running that software for a few real people should not automatically require moving it into cloud infrastructure.
-
-```text
-Build → run locally → share → learn → keep local software manageable
-```
+Current work is focused on local sandboxing, real-device persistence/key-store validation, encrypted backup/recovery, privacy-safe administration, and secure connectivity. Remix, marketplace, discovery, and creator monetization are intentionally on hold.
 
 ---
 
 # 미닛
 
-**Minit은 내 PC에서 실행 중인 앱을 바로 외부 사용자에게 공개하고, 장기적으로는 로컬 앱을 클라우드처럼 쉽게 관리하기 위한 오픈소스 도구입니다.**
+**내 PC에 앱을 배포하고, 클라우드처럼 관리합니다.**
 
-Claude Code, Codex, Cursor 등으로 앱을 빠르게 만들었다면 앱의 코드·데이터·실행 환경을 먼저 내 컴퓨터에 둔 채 실제 사용자에게 보여줄 수 있습니다.
+> **내 PC가 서버입니다.**
+
+Claude Code, Codex, Cursor 등으로 만든 앱을 굳이 별도 클라우드 서버로 옮기지 않고 **지금 사용하고 있는 컴퓨터에서 계속 실행**하는 것이 Minit의 중심 방향입니다.
 
 ```text
-AI로 앱 개발 → 내 PC에서 실행 → minit run → URL 공유 → 실제 사용자 테스트
+AI로 앱 개발
+   ↓
+minit deploy
+   ↓
+내 PC에서 지속 실행
+   ↓
+상태 확인 · 자동 재시작 · 버전 · 백업 · 관리
+   ↓
+필요하면 다른 사용자에게 공유
 ```
 
-## 설치
+앱의 **코드·데이터·secret·암호화 key·실행 compute는 로컬**에 남습니다. 선택적인 Minit cloud는 앱을 hosting하는 곳이 아니라 운영 통계 집계와 관리, 이미 암호화된 backup 보관 등을 위한 보조 layer입니다.
 
-`pipx` 사용 시:
+현재 PyPI `0.1.0`은 임시 공유 기능인 `minit run`을 제공합니다. `minit deploy`를 포함한 persistent local manager는 현재 `main / 0.2.0.dev0`에서 개발 중입니다.
+
+### `minit deploy`
 
 ```bash
-pipx install minit-runtime
+minit deploy --port 8000 -- python app.py
 ```
 
-또는 `uv`:
+의 의미는 **“이 앱을 이 컴퓨터에서 계속 실행해줘”** 입니다. Minit cloud로 앱을 upload한다는 뜻이 아닙니다.
+
+Minit은 local process를 background에서 관리하고 health check, crash restart, monitoring, local secret, snapshot/rollback, encrypted backup, recovery, autostart 등을 담당합니다.
+
+### `minit run`
 
 ```bash
-uv tool install minit-runtime
+minit run --port 8000
 ```
 
-Python 패키지 이름은 `minit-runtime`이고, 실행 명령은 `minit`입니다.
+은 현재 실행 중인 local app을 임시 public URL로 공유합니다. compute는 계속 내 PC에 있고, command를 종료하면 공개 경로도 닫힙니다.
 
-## 사용
+## 핵심 구조
 
-앱을 실행한 뒤:
-
-```bash
-minit run
+```text
+내 PC
+  코드 · 데이터 · secret · key · 실행
+            │
+            │ 최소 운영 통계 / 암호문 backup만
+            ▼
+선택적 Minit Cloud
+  admin · 집계 · alert · encrypted backup storage
 ```
 
-생성된 링크를 사용자에게 보내면 됩니다. **내 PC가 첫 번째 서버**가 되고, PC를 끄면 서비스도 종료됩니다.
-
-장기 방향은 앱의 실행·모니터링·버전·백업·공유·이동을 Minit이 관리하되, 앱 코드·데이터·secret·암호화 key의 control은 로컬에 두는 것입니다.
-
-## 보안 — 현재 MVP
-
-`minit run`을 실행하면 로컬 앱이 인터넷에서 접근 가능해집니다. 생성된 URL은 **공개 URL**이라고 생각하는 것이 안전합니다.
-
-현재 MVP에서는 비밀번호·API Key·개인정보·회사 내부자료 등 민감한 정보가 들어 있는 앱은 공개하지 않는 것을 권장합니다. 인증이 필요한 앱이라면 Minit으로 공개하기 전에 앱 자체에 인증을 구현해야 합니다. 특히 AI로 생성한 앱은 hard-coded API key, debug endpoint, 의도하지 않은 파일·데이터 접근이 없는지 확인한 뒤 공유하세요.
-
-현재 Minit은 민감하거나 production 용도보다는 **가벼운 prototype과 초기 사용자 테스트**를 위한 도구입니다.
+Minit의 목표는 **로컬 앱을 운영하기 위해 발생하는 귀찮은 admin을 없애는 것**이지, 앱을 Minit 서버로 가져가는 것이 아닙니다.
 
 ## License
 
