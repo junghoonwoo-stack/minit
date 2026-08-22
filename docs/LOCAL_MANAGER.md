@@ -109,7 +109,7 @@ Eligible metadata is deliberately narrow: opaque app/device IDs, health/status, 
 
 Not eligible in cleartext: app names, source code, commands, paths, filenames, application data, raw logs, prompts, user inputs/outputs, secrets, or decryption keys.
 
-A development cloud admin service now exists under `cloud_service/`. It can be deployed to Railway or another container platform. It stores only allowlisted status metadata and already-encrypted `.mnb` backup objects.
+A development cloud admin service exists under `cloud_service/`. It can be deployed to Railway or another container platform. It stores only allowlisted status metadata and already-encrypted `.mnb` backup objects.
 
 Connect a local app:
 
@@ -119,21 +119,42 @@ minit cloud configure --url https://<admin-service>
 
 The admin token is entered via a hidden prompt and stored in the approved local OS key store, not in the project file.
 
-Send the current allowlisted operational snapshot:
+Manual operations remain available:
 
 ```bash
 minit cloud sync
-```
-
-Upload a locally verified encrypted backup:
-
-```bash
 minit cloud backup <backup-id>
 ```
 
-The cloud server can store/return the ciphertext but does not possess the per-app key, backup data key, device root key, or user recovery key.
+The cloud server can store/return ciphertext but does not possess the per-app key, backup data key, device root key, or user recovery key.
 
-Automatic periodic status sync is deliberately still disabled. Explicit sync comes first so the privacy boundary is inspectable and testable before a background local management agent is introduced.
+## Isolated cloud administration agent
+
+Periodic cloud administration is deliberately separated from the application supervisor:
+
+```bash
+minit cloud agent start
+minit cloud agent status
+minit cloud agent stop
+```
+
+Default behavior:
+
+- privacy-safe status sync every 60 seconds
+- automatic backup **disabled**
+- cloud/network/key-store errors are recorded in local cloud-agent state/logs
+- retry uses bounded exponential backoff
+- the local application supervisor is not stopped or restarted because status sync failed
+
+Automatic encrypted backups require explicit opt-in because the first consistency model briefly stops the managed application:
+
+```bash
+minit cloud agent start --backup-every-hours 24
+```
+
+This creates a local authenticated `.mnb` backup first and uploads only that ciphertext.
+
+The cloud agent itself still needs user-level autostart and real-device OS key-store validation before it should be considered production persistent.
 
 See `docs/CLOUD_ADMIN_PRIVACY.md` and `cloud_service/README.md`.
 
@@ -142,8 +163,8 @@ See `docs/CLOUD_ADMIN_PRIVACY.md` and `cloud_service/README.md`.
 Near-term development is focused on making the local runtime private, simple, and reliable:
 
 1. sandbox / filesystem and network boundaries
-2. real-device autostart + OS key-store validation
-3. separate local background admin agent for periodic privacy-safe status sync and backup scheduling
+2. real-device autostart + OS key-store validation for both app supervisor and cloud agent
+3. backup retention/freshness and additional explicit data paths
 4. privacy-safe fleet/admin views and alerts
 5. authenticated end-to-end remote administration where the server cannot fabricate privileged commands
 
