@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from minit.environment import app_environment
+from minit.monitoring import ProcessMonitor
 from minit.runtime import app_log_path, clear_control, read_control, save_runtime_state
 from minit.service import load_service_spec
 
@@ -78,9 +79,11 @@ def _base_state(spec: dict[str, Any], supervisor_pid: int) -> dict[str, Any]:
         "port": spec["port"],
         "restart_policy": spec["restart_policy"],
         "restart_count": 0,
+        "metrics": {"available": False},
         "started_at": datetime.now(timezone.utc).isoformat(),
         "last_app_started_at": None,
         "last_health_at": None,
+        "last_metrics_at": None,
         "last_exit_code": None,
         "stopped_at": None,
     }
@@ -98,6 +101,7 @@ def supervise(project_dir: Path) -> int:
     save_runtime_state(state, root)
 
     app_process: subprocess.Popen[Any] | None = None
+    monitor: ProcessMonitor | None = None
     stop_requested = False
 
     def request_stop(*_args: Any) -> None:
@@ -109,6 +113,7 @@ def supervise(project_dir: Path) -> int:
         signal.signal(signal.SIGINT, request_stop)
 
     def start_app(log_handle: Any) -> subprocess.Popen[Any]:
+        nonlocal monitor
         process = subprocess.Popen(
             spec["command"],
             cwd=spec["working_dir"],
@@ -120,9 +125,14 @@ def supervise(project_dir: Path) -> int:
             env=app_environment(spec, root),
             **_process_group_kwargs(),
         )
+        try:
+            monitor = ProcessMonitor(process.pid)
+        except Exception:
+            monitor = None
         state["app_pid"] = process.pid
         state["status"] = "starting"
         state["health"] = "starting"
+        state["metrics"] = {"available": monitor is not None}
         state["last_app_started_at"] = datetime.now(timezone.utc).isoformat()
         save_runtime_state(state, root)
         return process
@@ -141,6 +151,7 @@ def supervise(project_dir: Path) -> int:
                 if exit_code is not None:
                     state["last_exit_code"] = exit_code
                     state["app_pid"] = None
+                    state["metrics"] = {"available": False}
                     save_runtime_state(state, root)
 
                     should_restart = spec["restart_policy"] == "always" or (
@@ -160,8 +171,9 @@ def supervise(project_dir: Path) -> int:
                     app_started_monotonic = time.monotonic()
                     continue
 
+                now = datetime.now(timezone.utc).isoformat()
                 healthy = _port_open(spec["port"])
-                state["last_health_at"] = datetime.now(timezone.utc).isoformat()
+                state["last_health_at"] = now
                 if healthy:
                     state["status"] = "running"
                     state["health"] = "healthy"
@@ -173,6 +185,10 @@ def supervise(project_dir: Path) -> int:
                 else:
                     state["status"] = "starting"
                     state["health"] = "starting"
+
+                if monitor is not None:
+                    state["metrics"] = monitor.sample()
+                    state["last_metrics_at"] = now
                 save_runtime_state(state, root)
                 time.sleep(HEALTH_INTERVAL_SECONDS)
 
@@ -186,6 +202,7 @@ def supervise(project_dir: Path) -> int:
         _terminate_process_tree(app_process)
         clear_control(root)
         state["app_pid"] = None
+        state["metrics"] = {"available": False}
         if state.get("status") != "failed":
             state["status"] = "stopped"
             state["health"] = "stopped"
