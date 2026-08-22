@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from minit.environment import supervisor_environment
 from minit.service import load_service_spec
 from minit.state import MINIT_DIR
 
@@ -156,6 +157,8 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
         "cwd": str(root),
         "stdin": subprocess.DEVNULL,
         "close_fds": True,
+        # The supervisor itself should not inherit arbitrary shell credentials.
+        "env": supervisor_environment(),
     }
     if os.name == "nt":
         popen_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
