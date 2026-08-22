@@ -4,7 +4,9 @@ from datetime import datetime
 
 import typer
 
+from minit.app_keys import get_or_create_app_key
 from minit.cli import _port_open, app, console
+from minit.key_store import SecureKeyStoreUnavailable, system_key_store_status
 from minit.management import local_app_status
 from minit.runtime import (
     load_runtime_state,
@@ -14,7 +16,13 @@ from minit.runtime import (
     stop_local_service,
     tail_app_log,
 )
+from minit.secrets import delete_secret, list_secret_names, set_secret
 from minit.service import RESTART_POLICIES, configure_local_service, load_service_spec
+
+security_app = typer.Typer(help="Inspect and initialize local key protection.")
+secret_app = typer.Typer(help="Manage encrypted secrets for this local app.")
+app.add_typer(security_app, name="security")
+app.add_typer(secret_app, name="secret")
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -82,9 +90,12 @@ def deploy(
     console.print(f"[green]✓ Port:[/green]          127.0.0.1:{spec['port']}")
     console.print(f"[green]✓ Supervisor:[/green]    PID {state.get('supervisor_pid')}")
     console.print(f"[green]✓ Status:[/green]        {state.get('status', 'starting')}")
+    console.print(f"[green]✓ Environment:[/green]   {spec.get('environment_policy', 'minimal')}")
     console.print()
     console.print("[bold]The app now runs from this computer without this terminal.[/bold]")
     console.print("[dim]No code or app data was uploaded by this command.[/dim]")
+    console.print("[dim]Arbitrary shell environment variables are not inherited by the managed app.[/dim]")
+    console.print("[dim]Use `minit secret set NAME` to add an app secret from the local encrypted store.[/dim]")
     console.print("[dim]Use `minit status`, `minit logs`, `minit restart`, or `minit stop` to manage it.[/dim]")
     console.print("[dim]Use `minit run --port <port>` separately for temporary public sharing.[/dim]")
 
@@ -105,6 +116,7 @@ def status():
     console.print(f"  total live time: {_format_duration(current['total_live_seconds'])}")
     console.print(f"  last started:    {_format_time(current['last_started_at'])}")
     console.print(f"  last stopped:    {_format_time(current['last_stopped_at'])}")
+    console.print(f"  local secrets:   {len(list_secret_names())} encrypted")
 
     spec = load_service_spec()
     runtime = load_runtime_state()
@@ -114,6 +126,7 @@ def status():
         console.print(f"  command:         {' '.join(spec['command'])}")
         console.print(f"  port:            127.0.0.1:{spec['port']}")
         console.print(f"  restart policy:  {spec['restart_policy']}")
+        console.print(f"  environment:     {spec.get('environment_policy', 'minimal')}")
         if runtime is None:
             console.print("  process:         configured, not started")
         else:
@@ -167,6 +180,70 @@ def logs_command(
         return
     for line in log_lines:
         console.print(line, markup=False)
+
+
+@security_app.command("doctor")
+def security_doctor():
+    """Check whether Minit can use an approved OS-backed key store."""
+    status_info = system_key_store_status()
+    console.print("[bold]Minit security doctor[/bold]")
+    console.print(f"  backend: {status_info.backend}")
+    console.print(f"  trusted: {'yes' if status_info.trusted else 'no'}")
+    console.print(f"  reason:  {status_info.reason}")
+    if not status_info.trusted:
+        console.print("[yellow]Minit will refuse to create encrypted local secrets on this backend.[/yellow]")
+        raise typer.Exit(1)
+
+
+@security_app.command("init")
+def security_init():
+    """Create/verify the local device root key and this app's wrapped app key."""
+    try:
+        get_or_create_app_key()
+    except (SecureKeyStoreUnavailable, RuntimeError) as exc:
+        console.print(f"[red]Could not initialize local key protection:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print("[green]✓ Local key protection initialized.[/green]")
+    console.print("[dim]The device root key stays in the operating-system key store.[/dim]")
+    console.print("[yellow]Recovery is not implemented yet. Losing the local root key can make encrypted secrets unrecoverable.[/yellow]")
+
+
+@secret_app.command("set")
+def secret_set(name: str = typer.Argument(..., help="Environment-style secret name, e.g. OPENAI_API_KEY.")):
+    """Encrypt and store an app secret locally. The value is entered via a hidden prompt."""
+    value = typer.prompt(f"Value for {name}", hide_input=True, confirmation_prompt=False)
+    try:
+        set_secret(name, value)
+    except (SecureKeyStoreUnavailable, RuntimeError, ValueError) as exc:
+        console.print(f"[red]Could not store local secret:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Stored encrypted local secret:[/green] {name}")
+    console.print("[dim]The plaintext value was not written to service.json or uploaded anywhere.[/dim]")
+
+
+@secret_app.command("list")
+def secret_list():
+    """List local secret names without decrypting values."""
+    names = list_secret_names()
+    if not names:
+        console.print("[dim]No local app secrets configured.[/dim]")
+        return
+    for name in names:
+        console.print(name, markup=False)
+
+
+@secret_app.command("delete")
+def secret_delete(name: str):
+    """Delete an encrypted local app secret."""
+    try:
+        removed = delete_secret(name)
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]Could not delete local secret:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if removed:
+        console.print(f"[green]✓ Deleted local secret:[/green] {name}")
+    else:
+        console.print(f"[yellow]Secret not found:[/yellow] {name}")
 
 
 if __name__ == "__main__":
