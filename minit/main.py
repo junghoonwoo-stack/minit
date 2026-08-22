@@ -36,6 +36,17 @@ def _format_duration(total_seconds: int) -> str:
     return f"{seconds}s"
 
 
+def _format_bytes(value: int | float | None) -> str:
+    if value is None:
+        return "unknown"
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size) < 1024.0 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+
 def _format_time(value: str | None) -> str:
     if not value:
         return "never"
@@ -137,6 +148,13 @@ def status():
             console.print(f"  supervisor pid:  {runtime.get('supervisor_pid') if alive else '-'}")
             console.print(f"  app pid:         {runtime.get('app_pid') if alive else '-'}")
             console.print(f"  restarts:        {runtime.get('restart_count', 0)}")
+            metrics = runtime.get("metrics", {})
+            if alive and metrics.get("available"):
+                cpu = metrics.get("cpu_percent")
+                cpu_text = f"{cpu:.1f}%" if isinstance(cpu, (int, float)) else "unknown"
+                console.print(f"  CPU:             {cpu_text}")
+                console.print(f"  memory:          {_format_bytes(metrics.get('rss_bytes'))}")
+                console.print(f"  child processes: {metrics.get('child_processes', 0)}")
 
     console.print("  status source:   local only")
 
