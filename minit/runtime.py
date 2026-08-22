@@ -140,7 +140,7 @@ def _force_terminate(pid: int | None) -> None:
         pass
 
 
-def start_local_service(project_dir: Path | None = None, timeout_seconds: float = 8.0) -> dict[str, Any]:
+def start_local_service(project_dir: Path | None = None, timeout_seconds: float = 25.0) -> dict[str, Any]:
     root = _project_root(project_dir)
     spec = load_service_spec(root)
     if spec is None:
@@ -167,22 +167,27 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
         popen_kwargs["stderr"] = subprocess.STDOUT
         process = subprocess.Popen(command, **popen_kwargs)
 
+    # Do not announce a successful deploy merely because the supervisor process
+    # exists. Wait until the local app reaches a real health state.
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         state = load_runtime_state(root)
         if state and state.get("supervisor_pid") == process.pid:
-            if state.get("status") == "failed":
+            status = state.get("status")
+            if status == "failed":
                 raise RuntimeError(state.get("error") or "Local supervisor failed to start.")
-            if state.get("status") in {"running", "degraded", "starting"}:
+            if status in {"running", "degraded"}:
                 return state
+            if status == "stopped":
+                exit_code = state.get("last_exit_code")
+                raise RuntimeError(f"The app stopped during startup (exit code {exit_code}).")
         if process.poll() is not None:
             raise RuntimeError("Local supervisor exited during startup.")
         time.sleep(0.1)
 
     state = load_runtime_state(root)
-    if state and state.get("supervisor_pid") == process.pid:
-        return state
-    raise RuntimeError("Timed out waiting for the local supervisor to start.")
+    health = state.get("health") if state else "unknown"
+    raise RuntimeError(f"Timed out waiting for the local app to become ready (health: {health}).")
 
 
 def stop_local_service(project_dir: Path | None = None, timeout_seconds: float = 10.0) -> dict[str, Any] | None:
