@@ -1,18 +1,31 @@
 # Minit Product Principles
 
-Minit does one thing first:
+Minit starts with a simple job:
 
-> **Take a web app that already works on localhost and make it easy to share with another person.**
+> **Take software that already works locally and make it easy to use and manage without moving the application into cloud compute.**
 
 ## Local first
 
-Your app keeps running on your own computer. Minit should not require you to move your code, change frameworks, or create infrastructure just to let someone try it.
+Your app, code, data, and compute stay on a machine you control unless you explicitly choose otherwise.
 
 > **Your PC is the first server.**
 
-## No account for the core workflow
+The product should make that local runtime feel operationally boring: start, share, monitor, recover, and move it without requiring the user to become a server administrator.
 
-The basic path stays simple:
+## Local control is the default
+
+The long-term product boundary is:
+
+```text
+Your machine: code · data · secrets · keys · execution
+Minit: management · connectivity · encrypted coordination
+```
+
+If Minit later operates relay, identity, rendezvous, or backup infrastructure, those services should be designed so application plaintext and decryption keys are not required by the service.
+
+## No account for the core local workflow
+
+The basic path remains:
 
 ```text
 build → localhost → minit run → shareable URL → feedback
@@ -22,13 +35,45 @@ build → localhost → minit run → shareable URL → feedback
 
 ## Work with what already runs
 
-Minit is not an application framework. If your web app is already listening on a local HTTP port, Minit should work around it rather than asking you to rebuild it around Minit.
+Minit is not an application framework. If software already works locally, Minit should manage around it rather than forcing a migration into a proprietary runtime.
 
-## Temporary by default
+## Temporary first, persistent when useful
 
-A shared app is live while Minit and the local computer remain running. Stop the process and the public path closes.
+`minit run` is intentionally temporary. It is appropriate for prototypes, demos, and first users.
 
-This makes the default workflow appropriate for prototypes, demos, and early user testing rather than production hosting.
+Repeated usage is a natural signal that an app is becoming persistent software. Minit should eventually offer a persistent local mode at the right moment, based on local usage signals rather than mandatory server telemetry.
+
+The intended distinction is:
+
+```text
+minit run     temporary local session
+minit deploy  persistent local service
+```
+
+`minit deploy` should mean "keep this running on this machine," not "upload this application to Minit cloud."
+
+## Management, not hosting
+
+The long-term management surface is organized around eight verbs:
+
+- **Run** — lifecycle, restart, health, boot persistence
+- **Connect** — secure public/private access
+- **Protect** — sandboxing, permissions, secrets, limits
+- **Observe** — users, health, logs, resources, AI cost
+- **Version** — snapshots and rollback
+- **Backup** — encrypted recovery copies
+- **Share** — people, teams, access policy
+- **Move** — migration between user-controlled machines
+
+## Encryption should be architectural
+
+Encryption is not a checkbox added later. Anything that leaves the local machine should be designed around local key ownership.
+
+Minit should use established cryptographic primitives and OS-backed secure storage. It should not invent a custom encryption scheme, and it should not claim zero-knowledge properties before those properties are implemented and reviewed.
+
+## Recovery is part of encryption UX
+
+If Minit cannot decrypt user backups, losing local keys can also mean losing recovery access. Key recovery, device replacement, and team recovery therefore belong in the product design from the beginning.
 
 ## Explicit security
 
@@ -38,14 +83,14 @@ See [SECURITY.md](../SECURITY.md).
 
 ## Small dependency footprint
 
-Installation and first run should require as little system knowledge and setup as practical. Infrastructure details should stay out of the way unless the user needs them.
+Installation and first run should require as little system knowledge and setup as practical. Infrastructure details stay out of the way unless the user needs them.
 
 ## Transparent and portable
 
-Minit should make its behavior understandable. The networking layer is an implementation detail, not the product itself, and should remain replaceable over time.
+Networking, relay, backup storage, and other infrastructure providers are implementation details. They should remain replaceable.
 
-A Minit project also receives a persistent local identity so the project can evolve without losing continuity.
+The persistent local app identity is the continuity anchor across runs, versions, backups, and future machine migration.
 
 ## Category
 
-**Micro IT** — software small enough to be built, launched, and initially operated by one person.
+**Local-first Micro IT** — small software that can be created and operated by one person or a small team, with Minit handling the management work around the local runtime.
