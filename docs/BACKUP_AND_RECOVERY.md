@@ -4,7 +4,7 @@ Minit's backup design must preserve the same local-first trust boundary as runti
 
 > **Remote storage may hold ciphertext. It must not hold the key that decrypts it.**
 
-This document describes the intended design. Remote backup and disaster recovery are not yet implemented product guarantees.
+Remote backup is not yet a product guarantee. Local source/config rollback and a user-held recovery-key foundation are now implemented on development `main`.
 
 ## Separate three different jobs
 
@@ -14,7 +14,7 @@ Minit should not treat versioning, rollback, and disaster backup as one operatio
 
 Purpose: recover from a bad AI edit or configuration change quickly.
 
-A code snapshot should capture the application's immutable/reproducible portion and support a fast rollback followed by a health check.
+The current development implementation captures a conservative set of source/config files, stores a local integrity manifest, creates a safety snapshot before rollback, and can restart a previously running service after restore.
 
 ### 2. Mutable application data backup
 
@@ -43,7 +43,7 @@ Examples of mutable data that may live beside source code:
 
 Therefore automatic rollback must not simply replace the whole project directory.
 
-The intended direction is:
+The current direction is:
 
 ```text
 project / immutable app files
@@ -54,13 +54,13 @@ project / immutable app files
              └── managed mutable data lifecycle
 ```
 
-Minit already exposes `MINIT_DATA_DIR` to managed apps. Future app configuration may declare additional data paths for existing applications that cannot migrate their state immediately.
+Minit exposes `MINIT_DATA_DIR` to managed apps. The current snapshot implementation excludes `.minit/` entirely and therefore does not modify `.minit/data` during rollback. It also deliberately does not delete source files that were created after the target snapshot; exact/pruning rollback requires a stronger declared data boundary first.
 
-Auto-detection may suggest likely data paths, but destructive operations should require an explicit boundary.
+Future app configuration may declare additional data paths for existing applications that cannot migrate their state immediately. Auto-detection may suggest likely data paths, but destructive operations should require an explicit boundary.
 
 ## Key hierarchy
 
-The intended local hierarchy is:
+The local hierarchy is:
 
 ```text
 OS-backed device root key
@@ -68,11 +68,11 @@ OS-backed device root key
        └── wraps per-app key
                  │
                  ├── local encrypted secrets
-                 ├── backup data keys
+                 ├── future backup data keys
                  └── protected app metadata
 ```
 
-The device root key remains in the operating-system key store. The per-app key may exist on disk only in wrapped/encrypted form.
+The device root key remains in an approved operating-system key store when available. Minit fails closed rather than using a plaintext key-file fallback. The per-app key may exist on disk only in wrapped/encrypted form.
 
 ## Recovery paradox
 
@@ -82,29 +82,31 @@ That is a feature of the threat model, not an implementation bug.
 
 A dependable remote backup therefore needs a second recovery path that does **not** create a Minit-held master key.
 
-Candidate recovery paths:
+Candidate recovery paths remain:
 
-1. **User-held recovery key** — generated locally and stored by the user in a password manager/offline location.
-2. **Trusted second device** — the app key is wrapped to another user-controlled device.
-3. **Organization-controlled recovery** — explicit customer-controlled escrow or threshold recovery for enterprise deployments.
+1. **User-held recovery key** — implemented as the first recovery path on development `main`.
+2. **Trusted second device** — future app-key wrapping to another user-controlled device.
+3. **Organization-controlled recovery** — future customer-controlled escrow or threshold recovery for enterprise deployments.
 
 Minit-operated infrastructure must never silently become the universal recovery holder.
 
-## Recovery envelope direction
+## User-held recovery envelope
 
-A future recovery setup can conceptually create:
+Development `main` now supports:
 
 ```text
 per-app key
     │
     ├── wrapped by device root key        → local app-key file
     │
-    └── wrapped by user recovery key      → recovery envelope
+    └── wrapped by user recovery key      → local recovery envelope
 ```
 
-The recovery envelope can be stored beside encrypted backups because it is not useful without the recovery key.
+`minit recovery create` generates a random 256-bit recovery key locally and prints it once for the user to store outside the machine. The recovery key itself is not written to the recovery-envelope file and there is no server upload path for it.
 
-The recovery key itself must never be uploaded to Minit backup infrastructure.
+`minit recovery restore` accepts the recovery key through a hidden prompt, unlocks the app key locally, and re-wraps that app key under the current device's OS-backed root key.
+
+The current implementation intentionally refuses to silently rotate an existing recovery key. Recovery-key rotation, multi-device recovery, and organization-controlled recovery remain future work.
 
 ## Remote-ready backup format
 
@@ -150,27 +152,27 @@ Cryptography can protect confidentiality and authenticated integrity, but it can
 
 Multiple user-controlled copies may therefore remain useful even with strong encryption.
 
-## Rollback safety sequence
+## Current rollback safety sequence
 
-A future code rollback should be conservative:
+Development `main` now follows this conservative sequence for source/config rollback:
 
 ```text
-create pre-rollback snapshot
+create pre-rollback safety snapshot
         ↓
-stop local service
+stop local service if running
         ↓
-restore code/config only
+verify snapshot identity/path/hash integrity
         ↓
-keep mutable data unchanged by default
+restore source/config files only
         ↓
-start app
+keep mutable data unchanged
         ↓
-health check
+restart app if it was running
         ↓
-commit rollback or automatically restore pre-rollback snapshot
+wait for health result
 ```
 
-Data restore should remain an explicit separate operation.
+If restart fails after files are restored, Minit reports the safety-snapshot ID so the operator retains a known recovery point. Data restore remains an explicit separate future operation.
 
 ## Current implementation status
 
@@ -178,16 +180,23 @@ Already present on development `main`:
 
 - persistent local app identity
 - explicit `.minit/data` location exposed as `MINIT_DATA_DIR`
-- OS-key-store direction for the device root key
+- conservative source/config snapshots independent of Git knowledge
+- per-file SHA256 integrity manifest and path-safety checks
+- safety snapshot before rollback
+- source rollback that preserves mutable `.minit/data`
+- service restart/health verification after rollback when applicable
+- OS-backed device-root-key direction with fail-closed backend policy
 - per-app key wrapped locally
 - authenticated encrypted local secrets
+- user-held recovery-key envelope and new-device app-key re-wrapping
 - no Minit server key path
 
 Still required before remote backup can be called dependable:
 
-- user/organization recovery flow
-- reviewed streaming encrypted backup format
-- code/data path declaration
-- backup manifests and retention
-- restore validation
-- optional multiple destinations
+- reviewed streaming authenticated-encryption format
+- crash-consistent database/data snapshot semantics
+- backup manifests, retention, and freshness policy
+- encrypted remote storage path
+- restore validation for mutable data
+- recovery-key rotation / trusted-device / organization-controlled recovery
+- optional multiple backup destinations
