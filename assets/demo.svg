@@ -2,12 +2,12 @@
   <rect width="1000" height="430" rx="18" fill="#111827"/>
   <circle cx="34" cy="32" r="7" fill="#ff5f56"/><circle cx="58" cy="32" r="7" fill="#ffbd2e"/><circle cx="82" cy="32" r="7" fill="#27c93f"/>
   <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="22">
-    <text x="34" y="90" fill="#e5e7eb">$ python -m http.server 8000</text>
-    <text x="34" y="130" fill="#9ca3af">Serving HTTP on port 8000 ...</text>
-    <text x="34" y="195" fill="#e5e7eb">$ minit run --port 8000</text>
-    <text x="34" y="245" fill="#5cd68b">✓ Local app: http://127.0.0.1:8000</text>
-    <text x="34" y="285" fill="#5cd68b">✓ Live URL: https://your-app.example.com</text>
-    <text x="34" y="325" fill="#5cd68b">✓ Compute: this PC</text>
-    <text x="34" y="385" fill="#6ea8fe">Your PC is the first server.</text>
+    <text x="34" y="92" fill="#e5e7eb">$ minit deploy --port 8000 -- python app.py</text>
+    <text x="34" y="155" fill="#5cd68b">✓ Local service: running</text>
+    <text x="34" y="200" fill="#5cd68b">✓ Port: 127.0.0.1:8000</text>
+    <text x="34" y="245" fill="#5cd68b">✓ Compute: this PC</text>
+    <text x="34" y="290" fill="#5cd68b">✓ App keeps running after terminal closes</text>
+    <text x="34" y="345" fill="#9ca3af">No application code or data was uploaded.</text>
+    <text x="34" y="392" fill="#6ea8fe">Your PC is the server. Minit handles the operations.</text>
   </g>
 </svg>
