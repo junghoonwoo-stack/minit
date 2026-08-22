@@ -40,7 +40,38 @@ minit secret set OPENAI_API_KEY
 minit secret list
 ```
 
-Secret values are entered through a hidden prompt. The device root key is intended to remain in an approved OS-backed key store, while per-app keys and secret values are stored on disk only as authenticated ciphertext.
+The device root key is expected to live in an approved OS-backed key store. Per-app keys are wrapped locally; secret values are encrypted locally.
+
+## Source snapshots and rollback
+
+```bash
+minit snapshot create --label before-change
+minit snapshot list
+minit rollback <snapshot-id>
+```
+
+Snapshots are for source/config recovery after a bad AI edit. `.minit/data` is intentionally outside source rollback.
+
+Rollback first creates a safety snapshot, restores source/config, and restarts a previously running managed service with a health check.
+
+## Mutable data and encrypted backup
+
+Minit exposes `.minit/data` to managed apps as `MINIT_DATA_DIR`.
+
+Development `main` now supports streaming encrypted data backups:
+
+```bash
+minit backup create
+minit backup list
+minit backup verify <backup-id>
+minit backup restore <backup-id>
+```
+
+If the managed app is running, backup creation temporarily stops it, streams `.minit/data` through tar+gzip directly into AES-256-GCM encryption, verifies the resulting ciphertext, and restarts the app.
+
+No plaintext tar archive is intentionally written to disk by this path.
+
+Encrypted `.mnb` backup objects are designed to be eligible for future blind cloud storage. Decryption keys remain local/user-controlled.
 
 ## User-held recovery
 
@@ -50,33 +81,11 @@ minit recovery status
 minit recovery restore
 ```
 
-`minit recovery create` prints a recovery key once. Minit does not upload or retain that recovery key. The local recovery envelope contains only a wrapped app key.
-
-The user must keep the recovery key somewhere independent of the machine. Losing both the device key and the recovery key can make protected local material unrecoverable.
-
-## Local snapshots and rollback
-
-```bash
-minit snapshot create --label before-change
-minit snapshot list
-minit rollback <snapshot-id>
-```
-
-The first snapshot implementation is deliberately conservative:
-
-- it snapshots common source/config files
-- `.minit/` is excluded entirely
-- `.minit/data` is therefore never changed by rollback
-- common non-source data such as databases/uploads are not treated as code versions
-- rollback creates a safety snapshot first
-- if the app was running, Minit restarts it and waits for a health result
-- files created after the target snapshot are not deleted yet
-
-This is not a replacement for application-aware database migrations or a full filesystem backup.
+The recovery key is generated locally and shown to the user. Minit does not store that key. The local recovery envelope contains only the per-app key encrypted under the user-held recovery key.
 
 ## User-level autostart
 
-After a local service has been configured:
+After a service is configured, development `main` includes:
 
 ```bash
 minit autostart install
@@ -84,36 +93,36 @@ minit autostart status
 minit autostart remove
 ```
 
-Current adapters target:
+Adapters exist for macOS LaunchAgent, Linux systemd user services, and Windows Task Scheduler. Real-device login/reboot validation remains pending.
 
-- macOS LaunchAgent
-- Linux systemd user service
-- Windows Task Scheduler `ONLOGON`
+## Cloud administration without cloud ownership
 
-The generated autostart entry contains the project path and Minit supervisor command, not application secret values. Real-device validation remains required on each supported OS before this is treated as release-ready.
+The future cloud layer is intended to remove tedious administration without becoming the app runtime.
 
-## Local filesystem protection
-
-On POSIX systems Minit-managed state is written with owner-only permissions:
-
-- `.minit/` directories: `0700`
-- local state, logs, encrypted envelopes, snapshots: `0600`
-
-Existing state can be re-hardened with:
+Use:
 
 ```bash
-minit security harden
+minit cloud preview
 ```
 
-Windows ACL hardening is a separate implementation item; Minit does not claim equivalent ACL enforcement there yet.
+to inspect the complete cleartext status payload currently eligible for a future Minit admin service.
 
-## Security boundary
+Eligible metadata is deliberately narrow: opaque app/device IDs, health/status, restart/autostart state, CPU/RAM/process metrics, aggregate run/live-time statistics, and encrypted-backup status.
 
-These development features strengthen local operation, but they do not yet complete the long-term security model. In particular:
+Not eligible in cleartext: app names, source code, commands, paths, filenames, application data, raw logs, prompts, user inputs/outputs, secrets, or decryption keys.
 
-- arbitrary AI-generated apps are not yet strongly sandboxed from other same-user local processes
-- persistent remote browser access with a blind relay / end-to-end session is not implemented
-- encrypted remote backup storage is not implemented
-- current `minit run` still uses Cloudflare Quick Tunnel and should not be treated as the future zero-server-plaintext architecture
+No automatic cloud telemetry transport is configured yet.
 
-See [THREAT_MODEL.md](THREAT_MODEL.md), [BACKUP_AND_RECOVERY.md](BACKUP_AND_RECOVERY.md), and [CONNECTIVITY_AND_IDENTITY.md](CONNECTIVITY_AND_IDENTITY.md).
+See `docs/CLOUD_ADMIN_PRIVACY.md`.
+
+## Current focus
+
+Near-term development is focused on making the local runtime private, simple, and reliable:
+
+1. sandbox / filesystem and network boundaries
+2. real-device autostart + OS key-store validation
+3. backup scheduling/retention and blind ciphertext upload
+4. privacy-safe fleet/admin views
+5. authenticated end-to-end remote administration where the server cannot fabricate privileged commands
+
+Marketplace, discovery, monetization, and Remix are intentionally on hold while this foundation is built.
