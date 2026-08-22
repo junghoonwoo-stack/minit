@@ -1,0 +1,36 @@
+name: Validate cloud agent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-cloud-agent.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate tests and agent CLI
+        id: validation
+        continue-on-error: true
+        run: |
+          python -m pip install -e ".[dev]"
+          pytest -q
+          minit cloud agent --help >/dev/null
+          minit cloud preview >/tmp/cloud-preview.txt
+          ! grep -q 'working_dir' /tmp/cloud-preview.txt
+      - name: Record result
+        run: |
+          echo "${{ steps.validation.outcome }}" > cloud-agent-validation.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud-agent-validation.txt
+          git commit -m "Record cloud agent validation" || true
+          git push
