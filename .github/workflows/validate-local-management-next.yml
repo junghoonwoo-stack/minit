@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run tests and local rollback smoke
+      - name: Run latest tests, rollback and deploy smoke
         shell: bash
         run: |
           LOG=/tmp/minit-next-validation.txt
@@ -34,6 +34,10 @@ jobs:
           data_ok=1
           perms_ok=1
           cli_ok=1
+          deploy_rc=99
+          deploy_ready=0
+          stop_rc=99
+          log_perms_ok=1
 
           if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ]; then
             rm -rf /tmp/minit-rollback-e2e
@@ -43,24 +47,42 @@ jobs:
             mkdir -p .minit/data
             printf "DATA-V1\n" > .minit/data/state.db
 
-            minit snapshot create --label v1 | tee /tmp/snapshot-create.txt
+            minit snapshot create --label v1
             snapshot_id=$(minit snapshot list | head -1 | awk '{print $1}')
             printf "print('v2')\n" > app.py
             printf "DATA-V2\n" > .minit/data/state.db
             minit rollback "$snapshot_id"
             rollback_rc=$?
-
             grep -q "v1" app.py
             code_ok=$?
             grep -q "DATA-V2" .minit/data/state.db
             data_ok=$?
 
-            if [ "$(stat -c '%a' .minit)" != "700" ]; then perms_ok=1; else perms_ok=0; fi
-            if [ "$(stat -c '%a' .minit/app.json)" != "600" ]; then perms_ok=1; fi
-            if [ "$(stat -c '%a' .minit/snapshots/index.json)" != "600" ]; then perms_ok=1; fi
+            if [ "$(stat -c '%a' .minit)" = "700" ] && [ "$(stat -c '%a' .minit/app.json)" = "600" ] && [ "$(stat -c '%a' .minit/snapshots/index.json)" = "600" ]; then
+              perms_ok=0
+            fi
 
             minit --help | grep -q rollback && minit autostart --help >/dev/null && minit snapshot --help >/dev/null
             cli_ok=$?
+
+            rm -rf /tmp/minit-deploy-latest
+            mkdir -p /tmp/minit-deploy-latest
+            cd /tmp/minit-deploy-latest
+            cat > app.py <<'PY'
+          from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+          ThreadingHTTPServer(("127.0.0.1", 8780), SimpleHTTPRequestHandler).serve_forever()
+          PY
+            minit deploy --port 8780 -- python app.py
+            deploy_rc=$?
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8780 >/dev/null; then deploy_ready=1; break; fi
+              sleep 1
+            done
+            if [ "$(stat -c '%a' .minit/runtime.json)" = "600" ] && [ "$(stat -c '%a' .minit/logs/app.log)" = "600" ] && [ "$(stat -c '%a' .minit/logs/supervisor.log)" = "600" ]; then
+              log_perms_ok=0
+            fi
+            minit stop
+            stop_rc=$?
           else
             code_ok=1
           fi
@@ -72,9 +94,13 @@ jobs:
           echo "data_ok=$data_ok"
           echo "perms_ok=$perms_ok"
           echo "cli_ok=$cli_ok"
+          echo "deploy_rc=$deploy_rc"
+          echo "deploy_ready=$deploy_ready"
+          echo "log_perms_ok=$log_perms_ok"
+          echo "stop_rc=$stop_rc"
 
           result=failure
-          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$rollback_rc" -eq 0 ] && [ "$code_ok" -eq 0 ] && [ "$data_ok" -eq 0 ] && [ "$perms_ok" -eq 0 ] && [ "$cli_ok" -eq 0 ]; then
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$rollback_rc" -eq 0 ] && [ "$code_ok" -eq 0 ] && [ "$data_ok" -eq 0 ] && [ "$perms_ok" -eq 0 ] && [ "$cli_ok" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$deploy_ready" -eq 1 ] && [ "$log_perms_ok" -eq 0 ] && [ "$stop_rc" -eq 0 ]; then
             result=success
           fi
           echo "result=$result"
@@ -84,5 +110,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add local-management-next-validation.txt
-          git commit -m "Record local management next validation" || true
+          git commit -m "Record latest local management validation" || true
           git push
