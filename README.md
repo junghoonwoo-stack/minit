@@ -6,6 +6,8 @@
 
 Minit is an open-source local-first runtime and management tool for apps built with Claude Code, Codex, Cursor, or any other coding workflow.
 
+> **Useful analogy:** think of Minit as an open-source **“local Vercel”** for AI-built apps — Vercel-like deployment and operations, without moving the application to somebody else's compute.
+
 AI coding makes it easy to create software locally. Minit is for the next step: **keep that software running on the computer you already own, without moving the app into cloud compute.**
 
 ```text
@@ -118,6 +120,8 @@ Minit
 code → your compute → managed there
 ```
 
+“Local Vercel” is an analogy, not the full product definition. Minit is focused on the operational problems created when the **user-owned machine remains the runtime and source of truth**: persistence, recovery, local security, encrypted backup, fleet visibility, and eventually secure remote administration.
+
 ## Local authority, optional cloud administration
 
 The architecture is intentionally asymmetric:
@@ -193,6 +197,8 @@ Current work is focused on local sandboxing, real-device persistence/key-store v
 **내 PC에 앱을 배포하고, 클라우드처럼 관리합니다.**
 
 > **내 PC가 서버입니다.**
+
+Minit을 빠르게 설명하면 **AI 앱을 위한 오픈소스 “Local Vercel”**이라고 볼 수 있습니다. Vercel처럼 deploy와 운영은 쉽게 만들되, 앱을 다른 회사의 compute로 옮기지 않고 **내 컴퓨터가 계속 runtime**이 됩니다.
 
 Claude Code, Codex, Cursor 등으로 만든 앱을 굳이 별도 클라우드 서버로 옮기지 않고 **지금 사용하고 있는 컴퓨터에서 계속 실행**하는 것이 Minit의 중심 방향입니다.
 
