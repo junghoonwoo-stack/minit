@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from cryptography.exceptions import InvalidTag
 from minit.app_keys import get_or_create_app_key
 from minit.crypto import decrypt_envelope, encrypt_envelope
 from minit.key_store import KeyStore
+from minit.private_fs import atomic_write_json, ensure_private_file
 from minit.state import MINIT_DIR, ensure_manifest
 
 SECRETS_FILE = "secrets.json"
@@ -26,6 +26,7 @@ def _load_secret_envelopes(project_dir: Path | None = None) -> dict[str, dict[st
     path = secrets_path(project_dir)
     if not path.exists():
         return {}
+    ensure_private_file(path)
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     if not isinstance(payload, dict):
@@ -37,15 +38,7 @@ def _save_secret_envelopes(
     payload: dict[str, dict[str, Any]],
     project_dir: Path | None = None,
 ) -> None:
-    path = secrets_path(project_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    if os.name != "nt":
-        tmp.chmod(0o600)
-    tmp.replace(path)
+    atomic_write_json(secrets_path(project_dir), payload, sort_keys=True)
 
 
 def _validate_name(name: str) -> None:
