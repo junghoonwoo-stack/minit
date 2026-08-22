@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import Any
 
 from cryptography.exceptions import InvalidTag
 
 from minit.crypto import decrypt_envelope, encrypt_envelope, generate_key
 from minit.key_store import KeyStore, get_or_create_device_root_key
+from minit.private_fs import atomic_write_json, ensure_private_file
 from minit.state import MINIT_DIR, ensure_manifest
 
 APP_KEY_FILE = "app-key.json"
@@ -17,17 +16,6 @@ APP_KEY_FILE = "app-key.json"
 def app_key_path(project_dir: Path | None = None) -> Path:
     root = (project_dir or Path.cwd()).resolve()
     return root / MINIT_DIR / APP_KEY_FILE
-
-
-def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
-        handle.write("\n")
-    if os.name != "nt":
-        tmp.chmod(0o600)
-    tmp.replace(path)
 
 
 def get_or_create_app_key(
@@ -45,6 +33,7 @@ def get_or_create_app_key(
     }
 
     if path.exists():
+        ensure_private_file(path)
         with path.open("r", encoding="utf-8") as handle:
             envelope = json.load(handle)
         if envelope.get("context") != context:
@@ -61,5 +50,5 @@ def get_or_create_app_key(
 
     app_key = generate_key()
     envelope = encrypt_envelope(app_key, root_key, context=context)
-    _write_private_json(path, envelope)
+    atomic_write_json(path, envelope)
     return app_key
