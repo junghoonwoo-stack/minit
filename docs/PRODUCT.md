@@ -2,19 +2,58 @@
 
 Minit starts with a simple job:
 
-> **Take software that already works locally and make it easy to use and manage without moving the application into cloud compute.**
+> **Deploy software to the computer you already own, and make that local runtime easy to operate.**
+
+Minit is not primarily a cloud hosting product. The local machine is the application server; Minit provides the management layer around it.
 
 ## Local first
 
-Your app, code, data, and compute stay on a machine you control unless you explicitly choose otherwise.
+Your app, code, data, secrets, keys, and compute stay on a machine you control unless you explicitly choose otherwise.
 
-> **Your PC is the first server.**
+> **Your PC is the server.**
 
-The product should make that local runtime feel operationally boring: start, share, monitor, recover, and move it without requiring the user to become a server administrator.
+The product should make that local runtime feel operationally boring: start, keep alive, monitor, recover, back up, share, and move it without requiring the user to become a server administrator.
+
+## The core primitive is local deployment
+
+The primary product path is:
+
+```text
+AI coding / local project
+        ↓
+    minit deploy
+        ↓
+app runs persistently on this computer
+        ↓
+Minit manages lifecycle / health / version / backup
+        ↓
+optional sharing and cloud administration
+```
+
+`minit deploy` means:
+
+> **Keep this app running on this machine.**
+
+It must not silently mean:
+
+> Upload this application to Minit cloud.
+
+The local machine remains the execution authority.
+
+## `run` and `deploy` are different jobs
+
+```text
+minit deploy  persistent local service on this computer
+minit run     temporary external sharing of an already-running local app
+```
+
+`minit run` remains useful for prototypes, demos, and first users. It should stay simple and should not require a Minit account.
+
+`minit deploy` is the long-term center of the product because it turns an ordinary user-controlled computer into a manageable application runtime.
 
 ## Local control is the default
 
-The long-term product boundary is:
+The product boundary is:
 
 ```text
 Your machine: code · data · secrets · keys · execution
@@ -35,34 +74,11 @@ Encrypted backup objects may be stored remotely, but backup data keys and recove
 
 See [Cloud Administration Privacy Boundary](CLOUD_ADMIN_PRIVACY.md).
 
-## No account for the core local workflow
-
-The basic path remains:
-
-```text
-build → localhost → minit run → shareable URL → feedback
-```
-
-`minit run` should not require a Minit account.
-
 ## Work with what already runs
 
 Minit is not an application framework. If software already works locally, Minit should manage around it rather than forcing a migration into a proprietary runtime.
 
-## Temporary first, persistent when useful
-
-`minit run` is intentionally temporary. It is appropriate for prototypes, demos, and first users.
-
-Repeated usage is a natural signal that an app is becoming persistent software. Minit should offer a persistent local mode at the right moment, based on local usage signals rather than mandatory server telemetry.
-
-The distinction is:
-
-```text
-minit run     temporary local session
-minit deploy  persistent local service
-```
-
-`minit deploy` means "keep this running on this machine," not "upload this application to Minit cloud."
+Claude Code, Codex, Cursor, and other tools may create the application. Minit should not require them to target a special Minit framework merely to become manageable.
 
 ## Management, not hosting
 
@@ -92,6 +108,8 @@ local machine = runtime + source of truth
 cloud          = admin window + blind storage/relay
 ```
 
+If the cloud service is unavailable, locally deployed apps should continue running.
+
 ## Encryption should be architectural
 
 Encryption is not a checkbox added later. Anything sensitive that leaves the local machine should be designed around local key ownership.
@@ -104,7 +122,9 @@ If Minit cannot decrypt user backups, losing local keys can also mean losing rec
 
 ## Explicit security
 
-Publishing localhost changes the security boundary of an application. Minit should make that visible, avoid pretending that an unguessable URL is authentication, and keep security-sensitive behavior explicit.
+Running AI-generated software on a personal or work computer changes the security boundary of that machine. Minit must make permissions explicit and progressively isolate apps from unrelated user files, credentials, other Minit apps, and OS key material.
+
+Temporary public sharing also changes the network boundary. An unguessable URL is not authentication.
 
 See [SECURITY.md](../SECURITY.md).
 
@@ -122,7 +142,7 @@ The persistent local app identity is the continuity anchor across runs, versions
 
 The near-term goal is intentionally narrow:
 
-> **Make locally running AI-built apps private, simple, reliable, and boring to operate.**
+> **Make deploying and operating AI-built apps on your own computer private, simple, reliable, and boring.**
 
 Priority is local runtime reliability, sandboxing, monitoring, rollback, encrypted backup, recovery, and privacy-safe administration.
 
@@ -130,4 +150,6 @@ Public marketplace, discovery, creator monetization, and **Remix are deliberatel
 
 ## Category
 
-**Local-first Micro IT** — small software that can be created and operated by one person or a small team, with Minit handling the management work around the local runtime.
+**Local-first application runtime and management** — software runs on user-controlled computers while Minit removes the operational work around that runtime.
+
+For small-team and long-tail software, this is also the basis for **Local-first Micro IT**.
