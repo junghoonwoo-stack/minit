@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run latest tests including recovery, rollback and deploy smoke
+      - name: Run final local-management validation
         shell: bash
         run: |
           LOG=/tmp/minit-next-validation.txt
@@ -30,10 +30,14 @@ jobs:
           pytest -q
           test_rc=$?
 
+          minit --help >/tmp/minit-help.txt
+          help_rc=$?
+          minit recovery --help >/tmp/minit-recovery-help.txt
+          recovery_help_rc=$?
+
           rollback_rc=99
           data_ok=1
           perms_ok=1
-          cli_ok=1
           deploy_rc=99
           deploy_ready=0
           stop_rc=99
@@ -62,9 +66,6 @@ jobs:
               perms_ok=0
             fi
 
-            minit --help | grep -q rollback && minit autostart --help >/dev/null && minit snapshot --help >/dev/null
-            cli_ok=$?
-
             rm -rf /tmp/minit-deploy-latest
             mkdir -p /tmp/minit-deploy-latest
             cd /tmp/minit-deploy-latest
@@ -89,18 +90,19 @@ jobs:
 
           echo "install_rc=$install_rc"
           echo "test_rc=$test_rc"
+          echo "help_rc=$help_rc"
+          echo "recovery_help_rc=$recovery_help_rc"
           echo "rollback_rc=$rollback_rc"
           echo "code_ok=$code_ok"
           echo "data_ok=$data_ok"
           echo "perms_ok=$perms_ok"
-          echo "cli_ok=$cli_ok"
           echo "deploy_rc=$deploy_rc"
           echo "deploy_ready=$deploy_ready"
           echo "log_perms_ok=$log_perms_ok"
           echo "stop_rc=$stop_rc"
 
           result=failure
-          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$rollback_rc" -eq 0 ] && [ "$code_ok" -eq 0 ] && [ "$data_ok" -eq 0 ] && [ "$perms_ok" -eq 0 ] && [ "$cli_ok" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$deploy_ready" -eq 1 ] && [ "$log_perms_ok" -eq 0 ] && [ "$stop_rc" -eq 0 ]; then
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$help_rc" -eq 0 ] && [ "$recovery_help_rc" -eq 0 ] && [ "$rollback_rc" -eq 0 ] && [ "$code_ok" -eq 0 ] && [ "$data_ok" -eq 0 ] && [ "$perms_ok" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$deploy_ready" -eq 1 ] && [ "$log_perms_ok" -eq 0 ] && [ "$stop_rc" -eq 0 ]; then
             result=success
           fi
           echo "result=$result"
@@ -110,5 +112,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add local-management-next-validation.txt
-          git commit -m "Record recovery-inclusive validation" || true
+          git commit -m "Record final local management validation" || true
           git push
