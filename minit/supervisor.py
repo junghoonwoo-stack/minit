@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from minit.environment import app_environment
 from minit.runtime import app_log_path, clear_control, read_control, save_runtime_state
 from minit.service import load_service_spec
 
@@ -116,6 +117,7 @@ def supervise(project_dir: Path) -> int:
             stderr=subprocess.STDOUT,
             shell=False,
             close_fds=True,
+            env=app_environment(spec, root),
             **_process_group_kwargs(),
         )
         state["app_pid"] = process.pid
