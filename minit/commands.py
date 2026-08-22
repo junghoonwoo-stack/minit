@@ -5,6 +5,14 @@ import json
 import typer
 
 from minit.backups import BackupError, create_backup, list_backups, restore_backup, verify_backup
+from minit.cloud_agent import (
+    CloudAgentError,
+    agent_is_running,
+    load_config as load_agent_config,
+    load_state as load_agent_state,
+    start_agent,
+    stop_agent,
+)
 from minit.cloud_client import (
     CloudClientError,
     cloud_is_configured,
@@ -25,9 +33,11 @@ from minit.recovery import (
 
 recovery_app = typer.Typer(help="Configure and use a recovery key that Minit servers never receive.")
 cloud_app = typer.Typer(help="Inspect and use privacy-safe Minit cloud administration.")
+cloud_agent_app = typer.Typer(help="Run cloud administration in a process isolated from the local app supervisor.")
 backup_app = typer.Typer(help="Create and restore locally encrypted mutable-data backups.")
 app.add_typer(recovery_app, name="recovery")
 app.add_typer(cloud_app, name="cloud")
+cloud_app.add_typer(cloud_agent_app, name="agent")
 app.add_typer(backup_app, name="backup")
 
 
@@ -150,7 +160,7 @@ def cloud_configure(
         raise typer.Exit(1) from exc
     console.print(f"[green]✓ Cloud admin configured:[/green] {config['base_url']}")
     console.print("[dim]URL is stored locally. The token is stored in the approved OS key store, not in the project config.[/dim]")
-    console.print("[dim]No automatic telemetry has been enabled. Use `minit cloud sync` explicitly.[/dim]")
+    console.print("[dim]No automatic telemetry has been enabled. Use `minit cloud sync` or explicitly start the cloud agent.[/dim]")
 
 
 @cloud_app.command("preview")
@@ -206,10 +216,77 @@ def cloud_status():
         raise typer.Exit(1) from exc
     console.print(f"configured: {'yes' if cloud_is_configured() else 'no'}")
     console.print(f"base URL:   {config['base_url'] if config else '-'}")
-    console.print("automatic telemetry upload: disabled")
     console.print("local runtime authority: yes")
     console.print("server-held app/data/recovery keys: no")
+    console.print(f"cloud agent: {'running' if agent_is_running() else 'stopped'}")
     console.print("Use `minit cloud preview` to inspect the exact eligible cleartext payload.")
+
+
+@cloud_agent_app.command("start")
+def cloud_agent_start(
+    interval: int = typer.Option(60, "--interval", min=30, help="Status sync interval in seconds."),
+    backup_every_hours: int = typer.Option(
+        0,
+        "--backup-every-hours",
+        min=0,
+        help="Create+upload an encrypted data backup every N hours. 0 disables automatic backups.",
+    ),
+):
+    """Start the detached cloud-admin agent. Cloud failures do not stop the local app supervisor."""
+    if not cloud_is_configured():
+        console.print("[red]Cloud admin is not configured.[/red] Run `minit cloud configure --url ...` first.")
+        raise typer.Exit(1)
+    backup_seconds = backup_every_hours * 60 * 60
+    try:
+        state = start_agent(
+            status_interval_seconds=interval,
+            backup_interval_seconds=backup_seconds,
+        )
+    except (CloudAgentError, RuntimeError, ValueError, OSError) as exc:
+        console.print(f"[red]Could not start cloud agent:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Cloud agent started.[/green] PID {state.get('pid')}")
+    console.print(f"  status sync: every {interval}s")
+    console.print(
+        f"  encrypted backup: {'disabled' if backup_every_hours == 0 else f'every {backup_every_hours}h'}"
+    )
+    console.print("[dim]The agent is separate from the app supervisor; cloud outages do not stop the local app.[/dim]")
+
+
+@cloud_agent_app.command("status")
+def cloud_agent_status():
+    """Show locally recorded cloud-agent state and schedule."""
+    try:
+        config = load_agent_config()
+    except CloudAgentError as exc:
+        console.print(f"[red]Cloud agent configuration is invalid:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    state = load_agent_state()
+    console.print(f"running:              {'yes' if agent_is_running() else 'no'}")
+    console.print(f"status interval:      {config['status_interval_seconds']}s")
+    backup_seconds = config["backup_interval_seconds"]
+    console.print(f"automatic backup:     {'disabled' if not backup_seconds else f'every {backup_seconds // 3600}h'}")
+    if state:
+        console.print(f"last status sync:     {state.get('last_status_sync_at') or '-'}")
+        console.print(f"last status sync ok:  {state.get('last_status_sync_ok')}")
+        console.print(f"last status error:    {state.get('last_status_error') or '-'}")
+        console.print(f"last backup:          {state.get('last_backup_at') or '-'}")
+        console.print(f"last backup ok:       {state.get('last_backup_ok')}")
+
+
+@cloud_agent_app.command("stop")
+def cloud_agent_stop():
+    """Stop the detached cloud administration agent without stopping the local app."""
+    try:
+        state = stop_agent()
+    except (CloudAgentError, RuntimeError, OSError) as exc:
+        console.print(f"[red]Could not stop cloud agent:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if state is None:
+        console.print("[dim]No cloud agent state found.[/dim]")
+        return
+    console.print("[green]✓ Cloud agent stopped.[/green]")
+    console.print("[dim]The local app supervisor was not touched.[/dim]")
 
 
 __all__ = ["app"]
