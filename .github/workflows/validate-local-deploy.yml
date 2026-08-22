@@ -1,0 +1,70 @@
+name: Validate local deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-local-deploy.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install and test
+        id: validation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install -e ".[dev]"
+          pytest -q
+
+          mkdir -p /tmp/minit-local-deploy-e2e
+          cd /tmp/minit-local-deploy-e2e
+
+          minit deploy --port 8765 -- python -m http.server 8765 --bind 127.0.0.1
+
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765 >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+
+          # The deploy command has already exited. The managed process must still live.
+          minit status | tee /tmp/minit-status.txt
+          grep -q "process:         running" /tmp/minit-status.txt
+          grep -q "health:          healthy" /tmp/minit-status.txt
+
+          minit stop
+          stopped=0
+          for i in $(seq 1 20); do
+            if ! curl -fsS http://127.0.0.1:8765 >/dev/null 2>&1; then
+              stopped=1
+              break
+            fi
+            sleep 0.5
+          done
+          test "$stopped" -eq 1
+
+      - name: Record result
+        shell: bash
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          echo "${{ steps.validation.outcome }}" > local-deploy-validation.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add local-deploy-validation.txt
+          git commit -m "Record local deploy validation result" || true
+          git push
