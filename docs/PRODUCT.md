@@ -18,10 +18,22 @@ The long-term product boundary is:
 
 ```text
 Your machine: code · data · secrets · keys · execution
-Minit: management · connectivity · encrypted coordination
+Minit cloud: aggregate administration · coordination · ciphertext storage
 ```
 
-If Minit later operates relay, identity, rendezvous, or backup infrastructure, those services should be designed so application plaintext and decryption keys are not required by the service.
+If Minit operates relay, identity, rendezvous, monitoring, or backup infrastructure, those services should be designed so application plaintext and decryption keys are not required by the service.
+
+A compromise of Minit-operated infrastructure may affect availability and expose deliberately retained operational metadata. It must not by itself reveal customer application plaintext or provide cryptographic authority over a local runtime.
+
+## Private by architecture
+
+Code, mutable data, raw logs, prompts, user inputs/outputs, secret values, and decryption keys are local by default.
+
+The cloud administration layer may receive a deliberately narrow set of aggregate operational metadata such as health, resource use, restart counts, aggregate usage, and encrypted-backup status. The exact cleartext contract must be inspectable and allowlisted in code.
+
+Encrypted backup objects may be stored remotely, but backup data keys and recovery keys must remain user-controlled.
+
+See [Cloud Administration Privacy Boundary](CLOUD_ADMIN_PRIVACY.md).
 
 ## No account for the core local workflow
 
@@ -41,16 +53,16 @@ Minit is not an application framework. If software already works locally, Minit 
 
 `minit run` is intentionally temporary. It is appropriate for prototypes, demos, and first users.
 
-Repeated usage is a natural signal that an app is becoming persistent software. Minit should eventually offer a persistent local mode at the right moment, based on local usage signals rather than mandatory server telemetry.
+Repeated usage is a natural signal that an app is becoming persistent software. Minit should offer a persistent local mode at the right moment, based on local usage signals rather than mandatory server telemetry.
 
-The intended distinction is:
+The distinction is:
 
 ```text
 minit run     temporary local session
 minit deploy  persistent local service
 ```
 
-`minit deploy` should mean "keep this running on this machine," not "upload this application to Minit cloud."
+`minit deploy` means "keep this running on this machine," not "upload this application to Minit cloud."
 
 ## Management, not hosting
 
@@ -65,11 +77,26 @@ The long-term management surface is organized around eight verbs:
 - **Share** — people, teams, access policy
 - **Move** — migration between user-controlled machines
 
+The local manager remains the execution authority even when a cloud dashboard is used for administration.
+
+## Cloud should remove administration, not ownership
+
+The cloud layer exists to remove tedious operations from the user: fleet overview, health summaries, backup status, alerts, scheduling, and future remote administration.
+
+It must not become the place where the application needs to live in order to function.
+
+A useful mental model is:
+
+```text
+local machine = runtime + source of truth
+cloud          = admin window + blind storage/relay
+```
+
 ## Encryption should be architectural
 
-Encryption is not a checkbox added later. Anything that leaves the local machine should be designed around local key ownership.
+Encryption is not a checkbox added later. Anything sensitive that leaves the local machine should be designed around local key ownership.
 
-Minit should use established cryptographic primitives and OS-backed secure storage. It should not invent a custom encryption scheme, and it should not claim zero-knowledge properties before those properties are implemented and reviewed.
+Minit should use established cryptographic primitives and OS-backed secure storage. It should not claim zero-knowledge properties before those properties are implemented and reviewed.
 
 ## Recovery is part of encryption UX
 
@@ -90,6 +117,16 @@ Installation and first run should require as little system knowledge and setup a
 Networking, relay, backup storage, and other infrastructure providers are implementation details. They should remain replaceable.
 
 The persistent local app identity is the continuity anchor across runs, versions, backups, and future machine migration.
+
+## Current product focus
+
+The near-term goal is intentionally narrow:
+
+> **Make locally running AI-built apps private, simple, reliable, and boring to operate.**
+
+Priority is local runtime reliability, sandboxing, monitoring, rollback, encrypted backup, recovery, and privacy-safe administration.
+
+Public marketplace, discovery, creator monetization, and **Remix are deliberately on hold** until the local runtime/management foundation is dependable.
 
 ## Category
 
