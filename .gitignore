@@ -1,0 +1,19 @@
+# Minit local state is private to the machine/project.
+.minit/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
