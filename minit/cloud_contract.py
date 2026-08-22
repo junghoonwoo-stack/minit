@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from minit.backups import latest_backup_summary
 from minit.device import get_or_create_device_id
 from minit.runtime import load_runtime_state, runtime_is_running
 from minit.service import load_service_spec
@@ -35,6 +36,12 @@ _ALLOWED_SCHEMA: dict[str, Any] = {
     "history": {
         "successful_runs": int,
         "total_live_seconds": int,
+    },
+    "backup": {
+        "available": bool,
+        "backup_id": (str, type(None)),
+        "created_at": (str, type(None)),
+        "ciphertext_bytes": (int, type(None)),
     },
 }
 
@@ -94,6 +101,7 @@ def build_cloud_status_payload(project_dir: Path | None = None) -> dict[str, Any
     runtime = load_runtime_state(root)
     running = runtime_is_running(root) if runtime is not None else False
     metrics = runtime.get("metrics", {}) if runtime else {}
+    latest_backup = latest_backup_summary(root)
 
     payload: dict[str, Any] = {
         "schema_version": CLOUD_STATUS_SCHEMA_VERSION,
@@ -118,6 +126,12 @@ def build_cloud_status_payload(project_dir: Path | None = None) -> dict[str, Any
             "successful_runs": int(history.get("successful_runs", 0)),
             "total_live_seconds": int(history.get("total_live_seconds", 0)),
         },
+        "backup": {
+            "available": latest_backup is not None,
+            "backup_id": latest_backup["backup_id"] if latest_backup else None,
+            "created_at": latest_backup["created_at"] if latest_backup else None,
+            "ciphertext_bytes": latest_backup["ciphertext_bytes"] if latest_backup else None,
+        },
     }
     return validate_cloud_status_payload(payload)
 
@@ -129,4 +143,5 @@ def cloud_cleartext_policy() -> tuple[str, ...]:
         "CPU/RAM/process-count operational metrics",
         "aggregate run count and live duration",
         "autostart state",
+        "latest encrypted-backup ID/time/ciphertext size",
     )
