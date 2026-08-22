@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from minit.private_fs import atomic_write_json, ensure_private_file
 from minit.state import MINIT_DIR, ensure_manifest
 
 SERVICE_FILE = "service.json"
@@ -79,11 +80,7 @@ def build_service_spec(
 
 
 def save_service_spec(spec: dict[str, Any], project_dir: Path | None = None) -> dict[str, Any]:
-    path = service_spec_path(project_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(spec, handle, indent=2)
-        handle.write("\n")
+    atomic_write_json(service_spec_path(project_dir), spec)
     return spec
 
 
@@ -101,5 +98,6 @@ def load_service_spec(project_dir: Path | None = None) -> dict[str, Any] | None:
     path = service_spec_path(project_dir)
     if not path.exists():
         return None
+    ensure_private_file(path)
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
