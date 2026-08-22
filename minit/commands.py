@@ -4,6 +4,7 @@ import json
 
 import typer
 
+from minit.backups import BackupError, create_backup, list_backups, restore_backup, verify_backup
 from minit.cloud_contract import build_cloud_status_payload, cloud_cleartext_policy
 from minit.main import app, console
 from minit.key_store import SecureKeyStoreUnavailable
@@ -16,8 +17,10 @@ from minit.recovery import (
 
 recovery_app = typer.Typer(help="Configure and use a recovery key that Minit servers never receive.")
 cloud_app = typer.Typer(help="Inspect the privacy-safe metadata eligible for Minit cloud administration.")
+backup_app = typer.Typer(help="Create and restore locally encrypted mutable-data backups.")
 app.add_typer(recovery_app, name="recovery")
 app.add_typer(cloud_app, name="cloud")
+app.add_typer(backup_app, name="backup")
 
 
 @recovery_app.command("create")
@@ -59,12 +62,79 @@ def recovery_restore():
     console.print("[dim]The recovered app key was re-wrapped with this device's OS-backed root key.[/dim]")
 
 
+@backup_app.command("create")
+def backup_create():
+    """Create a streaming encrypted backup of `.minit/data`."""
+    try:
+        result = create_backup()
+    except (BackupError, SecureKeyStoreUnavailable, RuntimeError, ValueError) as exc:
+        console.print(f"[red]Could not create encrypted backup:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]✓ Encrypted backup:[/green] {result['backup_id']}")
+    console.print(f"  files:      {result['file_count']}")
+    console.print(f"  bytes:      {result['ciphertext_bytes']}")
+    console.print(f"  verified:   {'yes' if result['verified'] else 'no'}")
+    console.print("[dim]Plaintext archive data was not written to disk. This file is eligible for future blind cloud storage.[/dim]")
+
+
+@backup_app.command("list")
+def backup_list():
+    """List local encrypted data backups."""
+    try:
+        entries = list_backups()
+    except BackupError as exc:
+        console.print(f"[red]Could not read backup index:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if not entries:
+        console.print("[dim]No encrypted data backups yet.[/dim]")
+        return
+    for entry in entries:
+        console.print(
+            f"{entry['backup_id']}  {entry['created_at']}  {entry['ciphertext_bytes']} bytes  verified={entry.get('verified', False)}",
+            markup=False,
+        )
+
+
+@backup_app.command("verify")
+def backup_verify(backup_id: str):
+    """Authenticate and inspect an encrypted backup without restoring it."""
+    try:
+        result = verify_backup(backup_id)
+    except (BackupError, SecureKeyStoreUnavailable, RuntimeError, ValueError) as exc:
+        console.print(f"[red]Backup verification failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Backup verified:[/green] {result['backup_id']}")
+    console.print(f"  files: {result['file_count']}")
+
+
+@backup_app.command("restore")
+def backup_restore(
+    backup_id: str,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Restore without interactive confirmation."),
+):
+    """Replace `.minit/data` with a verified encrypted backup."""
+    if not yes:
+        confirmed = typer.confirm(
+            f"Restore {backup_id}? Current .minit/data will be replaced after integrity verification."
+        )
+        if not confirmed:
+            raise typer.Abort()
+    try:
+        result = restore_backup(backup_id)
+    except (BackupError, SecureKeyStoreUnavailable, RuntimeError, ValueError, OSError) as exc:
+        console.print(f"[red]Backup restore failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Restored encrypted backup:[/green] {result['backup_id']}")
+    console.print(f"[dim]Managed service restarted: {'yes' if result['service_restarted'] else 'no'}[/dim]")
+
+
 @cloud_app.command("preview")
 def cloud_preview():
     """Print the complete cleartext status payload that may be sent to a future Minit admin service."""
     try:
         payload = build_cloud_status_payload()
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, ValueError, BackupError) as exc:
         console.print(f"[red]Could not build cloud status preview:[/red] {exc}")
         raise typer.Exit(1) from exc
 
