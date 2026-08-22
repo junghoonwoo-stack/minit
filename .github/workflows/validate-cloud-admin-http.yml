@@ -1,0 +1,83 @@
+name: Validate cloud admin HTTP boundary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-cloud-admin-http.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate local client tests
+        id: validation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -e
+          python -m pip install -e ".[dev]"
+          pytest -q
+          minit cloud --help >/dev/null
+          minit backup --help >/dev/null
+
+          python -m pip install -r cloud_service/requirements.txt
+          export MINIT_ADMIN_TOKEN=test-admin-token
+          export MINIT_CLOUD_DATA_DIR=/tmp/minit-cloud-admin
+          uvicorn cloud_service.app:app --host 127.0.0.1 --port 8899 >/tmp/minit-cloud.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8899/health >/dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:8899/health | grep -q 'ok'
+
+          cat >/tmp/status.json <<'JSON'
+          {
+            "schema_version":1,
+            "app_id":"11111111-1111-4111-8111-111111111111",
+            "device_id":"22222222-2222-4222-8222-222222222222",
+            "observed_at":"2026-08-22T09:30:00+00:00",
+            "service":{"configured":true,"running":true,"status":"running","health":"healthy","restart_count":0,"autostart":false},
+            "resources":{"available":true,"cpu_percent":1.5,"rss_bytes":123456,"child_processes":0},
+            "history":{"successful_runs":2,"total_live_seconds":300},
+            "backup":{"available":false,"backup_id":null,"created_at":null,"ciphertext_bytes":null}
+          }
+          JSON
+
+          curl -fsS -X POST http://127.0.0.1:8899/v1/status \
+            -H 'Authorization: Bearer test-admin-token' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/status.json | grep -q 'stored'
+
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/status.json'))
+          p['app_name']='must-be-rejected'
+          json.dump(p, open('/tmp/status-bad.json','w'))
+          PY
+          code=$(curl -sS -o /tmp/bad-response.txt -w '%{http_code}' -X POST http://127.0.0.1:8899/v1/status \
+            -H 'Authorization: Bearer test-admin-token' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/status-bad.json)
+          test "$code" = "422"
+
+          curl -fsS http://127.0.0.1:8899/v1/status \
+            -H 'Authorization: Bearer test-admin-token' | grep -q '11111111-1111-4111-8111-111111111111'
+      - name: Record result
+        run: |
+          echo "${{ steps.validation.outcome }}" > cloud-admin-http-validation.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud-admin-http-validation.txt
+          git commit -m "Record cloud admin HTTP validation" || true
+          git push
