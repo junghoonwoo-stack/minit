@@ -42,6 +42,9 @@ jobs:
           status_healthy=1
           stop_rc=99
           stopped=0
+          recovery_rc=99
+          recovered=0
+          restart_count_ok=1
 
           if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ]; then
             echo "=== local deploy e2e ==="
@@ -68,13 +71,6 @@ jobs:
             grep -q "health:          healthy" /tmp/minit-status.txt
             status_healthy=$?
 
-            echo "=== supervisor log ==="
-            cat .minit/logs/supervisor.log 2>/dev/null || true
-            echo "=== app log ==="
-            cat .minit/logs/app.log 2>/dev/null || true
-            echo "=== runtime state ==="
-            cat .minit/runtime.json 2>/dev/null || true
-
             echo "=== stop ==="
             minit stop
             stop_rc=$?
@@ -85,6 +81,37 @@ jobs:
               fi
               sleep 0.5
             done
+
+            echo "=== restart-on-failure e2e ==="
+            rm -rf /tmp/minit-recovery-e2e
+            mkdir -p /tmp/minit-recovery-e2e
+            cd /tmp/minit-recovery-e2e
+            cat > crash_then_serve.py <<'PY'
+          from pathlib import Path
+          import sys
+          from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+          marker = Path(".first-crash-done")
+          if not marker.exists():
+              marker.write_text("done", encoding="utf-8")
+              raise SystemExit(7)
+
+          ThreadingHTTPServer(("127.0.0.1", 8766), SimpleHTTPRequestHandler).serve_forever()
+          PY
+
+            minit deploy --port 8766 --restart on-failure -- python crash_then_serve.py
+            recovery_rc=$?
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8766 >/dev/null; then
+                recovered=1
+                break
+              fi
+              sleep 1
+            done
+            minit status | tee /tmp/minit-recovery-status.txt
+            grep -q "restarts:        1" /tmp/minit-recovery-status.txt
+            restart_count_ok=$?
+            minit stop || true
           fi
 
           echo "=== summary ==="
@@ -97,9 +124,12 @@ jobs:
           echo "status_healthy=$status_healthy"
           echo "stop_rc=$stop_rc"
           echo "stopped=$stopped"
+          echo "recovery_rc=$recovery_rc"
+          echo "recovered=$recovered"
+          echo "restart_count_ok=$restart_count_ok"
 
           overall=failure
-          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$ready" -eq 1 ] && [ "$status_rc" -eq 0 ] && [ "$status_running" -eq 0 ] && [ "$status_healthy" -eq 0 ] && [ "$stop_rc" -eq 0 ] && [ "$stopped" -eq 1 ]; then
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$ready" -eq 1 ] && [ "$status_rc" -eq 0 ] && [ "$status_running" -eq 0 ] && [ "$status_healthy" -eq 0 ] && [ "$stop_rc" -eq 0 ] && [ "$stopped" -eq 1 ] && [ "$recovery_rc" -eq 0 ] && [ "$recovered" -eq 1 ] && [ "$restart_count_ok" -eq 0 ]; then
             overall=success
           fi
           echo "result=$overall"
