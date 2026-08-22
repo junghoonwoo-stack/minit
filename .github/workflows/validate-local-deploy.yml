@@ -1,3 +1,4 @@
+# Temporary validation workflow; remove after a clean result.
 name: Validate local deploy
 
 on:
