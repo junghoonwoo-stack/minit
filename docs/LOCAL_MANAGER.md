@@ -58,7 +58,7 @@ Rollback first creates a safety snapshot, restores source/config, and restarts a
 
 Minit exposes `.minit/data` to managed apps as `MINIT_DATA_DIR`.
 
-Development `main` now supports streaming encrypted data backups:
+Development `main` supports streaming encrypted data backups:
 
 ```bash
 minit backup create
@@ -71,7 +71,7 @@ If the managed app is running, backup creation temporarily stops it, streams `.m
 
 No plaintext tar archive is intentionally written to disk by this path.
 
-Encrypted `.mnb` backup objects are designed to be eligible for future blind cloud storage. Decryption keys remain local/user-controlled.
+Encrypted `.mnb` backup objects are suitable for blind cloud storage because decryption keys remain local/user-controlled.
 
 ## User-held recovery
 
@@ -97,23 +97,45 @@ Adapters exist for macOS LaunchAgent, Linux systemd user services, and Windows T
 
 ## Cloud administration without cloud ownership
 
-The future cloud layer is intended to remove tedious administration without becoming the app runtime.
+The cloud layer exists to remove tedious administration without becoming the app runtime.
 
-Use:
+First inspect exactly what is eligible to leave the device in cleartext:
 
 ```bash
 minit cloud preview
 ```
 
-to inspect the complete cleartext status payload currently eligible for a future Minit admin service.
-
 Eligible metadata is deliberately narrow: opaque app/device IDs, health/status, restart/autostart state, CPU/RAM/process metrics, aggregate run/live-time statistics, and encrypted-backup status.
 
 Not eligible in cleartext: app names, source code, commands, paths, filenames, application data, raw logs, prompts, user inputs/outputs, secrets, or decryption keys.
 
-No automatic cloud telemetry transport is configured yet.
+A development cloud admin service now exists under `cloud_service/`. It can be deployed to Railway or another container platform. It stores only allowlisted status metadata and already-encrypted `.mnb` backup objects.
 
-See `docs/CLOUD_ADMIN_PRIVACY.md`.
+Connect a local app:
+
+```bash
+minit cloud configure --url https://<admin-service>
+```
+
+The admin token is entered via a hidden prompt and stored in the approved local OS key store, not in the project file.
+
+Send the current allowlisted operational snapshot:
+
+```bash
+minit cloud sync
+```
+
+Upload a locally verified encrypted backup:
+
+```bash
+minit cloud backup <backup-id>
+```
+
+The cloud server can store/return the ciphertext but does not possess the per-app key, backup data key, device root key, or user recovery key.
+
+Automatic periodic status sync is deliberately still disabled. Explicit sync comes first so the privacy boundary is inspectable and testable before a background local management agent is introduced.
+
+See `docs/CLOUD_ADMIN_PRIVACY.md` and `cloud_service/README.md`.
 
 ## Current focus
 
@@ -121,8 +143,8 @@ Near-term development is focused on making the local runtime private, simple, an
 
 1. sandbox / filesystem and network boundaries
 2. real-device autostart + OS key-store validation
-3. backup scheduling/retention and blind ciphertext upload
-4. privacy-safe fleet/admin views
+3. separate local background admin agent for periodic privacy-safe status sync and backup scheduling
+4. privacy-safe fleet/admin views and alerts
 5. authenticated end-to-end remote administration where the server cannot fabricate privileged commands
 
 Marketplace, discovery, monetization, and Remix are intentionally on hold while this foundation is built.
