@@ -5,9 +5,11 @@ from datetime import datetime
 import typer
 
 from minit.app_keys import get_or_create_app_key
+from minit.autostart import AutostartUnavailable, autostart_info, disable_autostart, enable_autostart
 from minit.cli import _port_open, app, console
 from minit.key_store import SecureKeyStoreUnavailable, system_key_store_status
 from minit.management import local_app_status
+from minit.private_fs import harden_private_tree
 from minit.runtime import (
     load_runtime_state,
     restart_local_service,
@@ -18,11 +20,17 @@ from minit.runtime import (
 )
 from minit.secrets import delete_secret, list_secret_names, set_secret
 from minit.service import RESTART_POLICIES, configure_local_service, load_service_spec
+from minit.snapshots import SnapshotError, create_snapshot, list_snapshots, restore_snapshot
+from minit.state import MINIT_DIR
 
 security_app = typer.Typer(help="Inspect and initialize local key protection.")
 secret_app = typer.Typer(help="Manage encrypted secrets for this local app.")
+autostart_app = typer.Typer(help="Start this local app automatically when the user session starts.")
+snapshot_app = typer.Typer(help="Create and restore local source/config snapshots.")
 app.add_typer(security_app, name="security")
 app.add_typer(secret_app, name="secret")
+app.add_typer(autostart_app, name="autostart")
+app.add_typer(snapshot_app, name="snapshot")
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -91,6 +99,7 @@ def deploy(
 
     try:
         spec = configure_local_service(command, port, restart_policy=restart_policy)
+        harden_private_tree(spec_path_parent := __import__("pathlib").Path.cwd() / MINIT_DIR)
         state = start_local_service()
     except (RuntimeError, ValueError) as exc:
         console.print(f"[red]Could not deploy local service:[/red] {exc}")
@@ -108,6 +117,7 @@ def deploy(
     console.print("[dim]Arbitrary shell environment variables are not inherited by the managed app.[/dim]")
     console.print("[dim]Use `minit secret set NAME` to add an app secret from the local encrypted store.[/dim]")
     console.print("[dim]Use `minit status`, `minit logs`, `minit restart`, or `minit stop` to manage it.[/dim]")
+    console.print("[dim]Use `minit autostart install` if this app should return after login/reboot.[/dim]")
     console.print("[dim]Use `minit run --port <port>` separately for temporary public sharing.[/dim]")
 
 
@@ -138,6 +148,7 @@ def status():
         console.print(f"  port:            127.0.0.1:{spec['port']}")
         console.print(f"  restart policy:  {spec['restart_policy']}")
         console.print(f"  environment:     {spec.get('environment_policy', 'minimal')}")
+        console.print(f"  autostart:       {'enabled' if spec.get('autostart') else 'disabled'}")
         if runtime is None:
             console.print("  process:         configured, not started")
         else:
@@ -200,6 +211,90 @@ def logs_command(
         console.print(line, markup=False)
 
 
+@autostart_app.command("install")
+def autostart_install():
+    """Install a user-level login/boot entry for the configured local service."""
+    try:
+        info = enable_autostart()
+    except (AutostartUnavailable, OSError, __import__("subprocess").CalledProcessError) as exc:
+        console.print(f"[red]Could not install autostart:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Autostart installed:[/green] {info.identifier}")
+    console.print(f"[dim]Platform: {info.platform}; no app secret values are stored in the autostart entry.[/dim]")
+    console.print("[dim]The entry takes effect for the user session; system-wide/root privileges are not required by Minit.[/dim]")
+
+
+@autostart_app.command("status")
+def autostart_status():
+    """Show whether the current app has a user-level autostart entry."""
+    try:
+        info = autostart_info()
+    except AutostartUnavailable as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(1) from exc
+    console.print(f"platform:   {info.platform}")
+    console.print(f"identifier: {info.identifier}")
+    console.print(f"installed:  {'yes' if info.installed else 'no'}")
+    if info.path is not None:
+        console.print(f"path:       {info.path}")
+
+
+@autostart_app.command("remove")
+def autostart_remove():
+    """Remove the current app's user-level autostart entry."""
+    try:
+        info = disable_autostart()
+    except (AutostartUnavailable, OSError) as exc:
+        console.print(f"[red]Could not remove autostart:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Autostart removed:[/green] {info.identifier}")
+
+
+@snapshot_app.command("create")
+def snapshot_create(label: str | None = typer.Option(None, "--label", "-l")):
+    """Create a local source/config snapshot. Mutable app data is not included."""
+    try:
+        entry = create_snapshot(label=label)
+    except SnapshotError as exc:
+        console.print(f"[red]Could not create snapshot:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Snapshot:[/green] {entry['snapshot_id']}")
+    console.print(f"  files: {entry['file_count']}")
+    console.print(f"  size:  {_format_bytes(entry['archive_bytes'])}")
+    console.print("[dim]Scope: source/config only. .minit/data and non-source data are untouched.[/dim]")
+
+
+@snapshot_app.command("list")
+def snapshot_list():
+    """List local source/config snapshots."""
+    try:
+        entries = list_snapshots()
+    except SnapshotError as exc:
+        console.print(f"[red]Could not read snapshots:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if not entries:
+        console.print("[dim]No local snapshots yet.[/dim]")
+        return
+    for entry in entries:
+        label = f"  {entry['label']}" if entry.get("label") else ""
+        console.print(f"{entry['snapshot_id']}  {entry['file_count']} files{label}", markup=False)
+
+
+@app.command()
+def rollback(snapshot_id: str = typer.Argument(..., help="Snapshot ID from `minit snapshot list`.")):
+    """Safely restore source/config files from a local snapshot."""
+    try:
+        result = restore_snapshot(snapshot_id)
+    except SnapshotError as exc:
+        console.print(f"[red]Rollback failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓ Rolled back to:[/green] {result['snapshot_id']}")
+    console.print(f"[green]✓ Safety snapshot:[/green] {result['safety_snapshot_id']}")
+    console.print(f"[green]✓ Restored files:[/green] {result['restored_files']}")
+    console.print(f"[green]✓ Service health:[/green] {result['service_health']}")
+    console.print(f"[dim]{result['note']}[/dim]")
+
+
 @security_app.command("doctor")
 def security_doctor():
     """Check whether Minit can use an approved OS-backed key store."""
@@ -224,6 +319,17 @@ def security_init():
     console.print("[green]✓ Local key protection initialized.[/green]")
     console.print("[dim]The device root key stays in the operating-system key store.[/dim]")
     console.print("[yellow]Recovery is not implemented yet. Losing the local root key can make encrypted secrets unrecoverable.[/yellow]")
+
+
+@security_app.command("harden")
+def security_harden():
+    """Re-apply owner-only permissions to existing local Minit state."""
+    from pathlib import Path
+
+    root = Path.cwd() / MINIT_DIR
+    harden_private_tree(root)
+    console.print(f"[green]✓ Hardened local Minit state:[/green] {root}")
+    console.print("[dim]POSIX uses owner-only permissions. Windows ACL hardening is a separate pending implementation.[/dim]")
 
 
 @secret_app.command("set")
