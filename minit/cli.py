@@ -44,6 +44,8 @@ CLOUDFLARED_SHA256 = {
     "cloudflared-linux-amd64": "9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17",
     "cloudflared-linux-arm64": "65259e652a7bea08bf5df603233ab22b8bf3116af8df9f9206209af6a1b955c0",
 }
+INSTALL_LOCK_TIMEOUT_SECONDS = 120.0
+INSTALL_LOCK_STALE_SECONDS = 300.0
 
 
 def _port_open(port: int) -> bool:
@@ -131,6 +133,56 @@ def _download_cloudflared(destination: Path) -> Path:
     return destination
 
 
+def _install_lock_path(cached: Path) -> Path:
+    return cached.with_name(f".{cached.name}.install.lock")
+
+
+def _try_remove_stale_install_lock(lock_path: Path) -> None:
+    try:
+        age = time.time() - lock_path.stat().st_mtime
+    except FileNotFoundError:
+        return
+    if age > INSTALL_LOCK_STALE_SECONDS:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _install_cloudflared_once(cached: Path) -> str:
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _install_lock_path(cached)
+    deadline = time.monotonic() + INSTALL_LOCK_TIMEOUT_SECONDS
+
+    while True:
+        if cached.exists():
+            return str(cached)
+
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            _try_remove_stale_install_lock(lock_path)
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Timed out waiting for another Minit process to prepare networking.")
+            time.sleep(0.1)
+            continue
+
+        try:
+            os.write(fd, f"pid={os.getpid()}\n".encode("ascii"))
+            os.close(fd)
+            fd = -1
+            if cached.exists():
+                return str(cached)
+            return str(_download_cloudflared(cached))
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def _cloudflared_path(auto_install: bool = True) -> str | None:
     system_binary = shutil.which("cloudflared")
     if system_binary:
@@ -145,7 +197,7 @@ def _cloudflared_path(auto_install: bool = True) -> str | None:
         return None
 
     try:
-        return str(_download_cloudflared(cached))
+        return _install_cloudflared_once(cached)
     except Exception as exc:
         console.print(f"[red]Minit could not prepare networking automatically:[/red] {exc}")
         return None
