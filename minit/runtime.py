@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from minit.environment import supervisor_environment
+from minit.private_fs import atomic_write_json, ensure_private_dir, ensure_private_file
 from minit.service import load_service_spec
 from minit.state import MINIT_DIR
 
@@ -45,10 +46,19 @@ def supervisor_log_path(project_dir: Path | None = None) -> Path:
     return logs_dir(project_dir) / SUPERVISOR_LOG_FILE
 
 
+def _prepare_private_log(path: Path) -> Path:
+    ensure_private_dir(path.parent)
+    if not path.exists():
+        path.touch(mode=0o600, exist_ok=True)
+    ensure_private_file(path)
+    return path
+
+
 def load_runtime_state(project_dir: Path | None = None) -> dict[str, Any] | None:
     path = runtime_state_path(project_dir)
     if not path.exists():
         return None
+    ensure_private_file(path)
     try:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
@@ -57,28 +67,16 @@ def load_runtime_state(project_dir: Path | None = None) -> dict[str, Any] | None
 
 
 def save_runtime_state(state: dict[str, Any], project_dir: Path | None = None) -> dict[str, Any]:
-    path = runtime_state_path(project_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2)
-        handle.write("\n")
-    tmp.replace(path)
+    atomic_write_json(runtime_state_path(project_dir), state)
     return state
 
 
 def _write_control(action: str, project_dir: Path | None = None) -> None:
-    path = control_path(project_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "action": action,
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
-        handle.write("\n")
-    tmp.replace(path)
+    atomic_write_json(control_path(project_dir), payload)
 
 
 def clear_control(project_dir: Path | None = None) -> None:
@@ -92,6 +90,7 @@ def read_control(project_dir: Path | None = None) -> dict[str, Any] | None:
     path = control_path(project_dir)
     if not path.exists():
         return None
+    ensure_private_file(path)
     try:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
@@ -150,14 +149,13 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
         raise RuntimeError("The local service is already running.")
 
     clear_control(root)
-    logs_dir(root).mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(logs_dir(root))
 
     command = [sys.executable, "-m", "minit.supervisor", str(root)]
     popen_kwargs: dict[str, Any] = {
         "cwd": str(root),
         "stdin": subprocess.DEVNULL,
         "close_fds": True,
-        # The supervisor itself should not inherit arbitrary shell credentials.
         "env": supervisor_environment(),
     }
     if os.name == "nt":
@@ -165,13 +163,12 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
     else:
         popen_kwargs["start_new_session"] = True
 
-    with supervisor_log_path(root).open("ab", buffering=0) as supervisor_log:
+    supervisor_path = _prepare_private_log(supervisor_log_path(root))
+    with supervisor_path.open("ab", buffering=0) as supervisor_log:
         popen_kwargs["stdout"] = supervisor_log
         popen_kwargs["stderr"] = subprocess.STDOUT
         process = subprocess.Popen(command, **popen_kwargs)
 
-    # Do not announce a successful deploy merely because the supervisor process
-    # exists. Wait until the local app reaches a real health state.
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         state = load_runtime_state(root)
@@ -215,8 +212,6 @@ def stop_local_service(project_dir: Path | None = None, timeout_seconds: float =
         time.sleep(0.1)
 
     if pid_is_alive(supervisor_pid):
-        # Normal operation uses the local control file. This is only a fallback
-        # for a wedged supervisor and intentionally remains local to the host.
         _force_terminate(state.get("app_pid"))
         _force_terminate(supervisor_pid)
 
@@ -239,6 +234,7 @@ def tail_app_log(project_dir: Path | None = None, lines: int = 50) -> list[str]:
     path = app_log_path(project_dir)
     if not path.exists():
         return []
+    ensure_private_file(path)
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         content = handle.readlines()
     return [line.rstrip("\n") for line in content[-max(1, lines):]]
