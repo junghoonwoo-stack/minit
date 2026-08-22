@@ -47,6 +47,8 @@ def get_or_create_app_key(
     if path.exists():
         with path.open("r", encoding="utf-8") as handle:
             envelope = json.load(handle)
+        if envelope.get("context") != context:
+            raise RuntimeError("Local app key is not bound to this Minit app identity.")
         try:
             app_key = decrypt_envelope(envelope, root_key)
         except (InvalidTag, KeyError, ValueError) as exc:
