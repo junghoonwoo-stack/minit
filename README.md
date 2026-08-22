@@ -4,13 +4,15 @@
 
 > **Your PC is the first server.**
 
-Minit is an open-source tool for people who build apps with Claude Code, Codex, Cursor, or other AI coding tools and want real users to try them immediately — without setting up cloud infrastructure first.
+Minit is an open-source local-first tool for people who build apps with Claude Code, Codex, Cursor, or other AI coding tools.
 
-Your app keeps running on your own PC. Minit gives it a shareable URL.
+Today, Minit makes an app already running on your computer reachable through a shareable URL. The direction is broader: make local software easy to run, observe, version, back up, share, and move **without making cloud compute the default runtime**.
+
+Your application process and compute stay on your own machine.
 
 ![Minit demo](assets/demo.svg)
 
-No account. No cloud setup. No separate server software.
+No account. No cloud compute setup. No separate app server.
 
 **Website:** https://junghoonwoo-stack.github.io/minit/
 
@@ -71,6 +73,27 @@ minit run --port 8000
 
 Open the generated URL from another device.
 
+## Local-first direction
+
+Minit's architectural direction is:
+
+```text
+Your machine
+  app · data · secrets · keys · compute
+             │
+             ▼
+      Minit Local Manager
+  run · connect · protect · observe
+  version · backup · share · move
+             │
+             ▼
+ optional encrypted coordination / relay
+```
+
+The local machine remains authoritative. Future remote coordination services should not require possession of application plaintext or decryption keys.
+
+This is a design direction, not a claim that all of those management and encryption features are implemented today. See [Architecture](docs/ARCHITECTURE.md) and [Product Principles](docs/PRODUCT.md).
+
 ## Security — MVP
 
 `minit run` makes your local app reachable from the public internet. Treat the generated URL as public.
@@ -88,23 +111,19 @@ Read the full [Security Policy](SECURITY.md).
 
 ## Why Minit?
 
-AI coding made building software much easier. Getting a local app in front of real users should be just as easy.
+AI coding made building software much easier. Running that software for a few real people should not automatically require moving it into cloud infrastructure.
 
 ```text
-Build → launch → share → learn
+Build → run locally → share → learn → keep local software manageable
 ```
-
-Minit is open source and focused first on making this local-to-live experience as simple as possible.
-
-For implementation details, see [Architecture](docs/ARCHITECTURE.md) and [Product Principles](docs/PRODUCT.md).
 
 ---
 
 # 미닛
 
-**Minit은 내 PC에서 실행 중인 앱을 바로 외부 사용자에게 공개할 수 있게 해주는 오픈소스 도구입니다.**
+**Minit은 내 PC에서 실행 중인 앱을 바로 외부 사용자에게 공개하고, 장기적으로는 로컬 앱을 클라우드처럼 쉽게 관리하기 위한 오픈소스 도구입니다.**
 
-Claude Code, Codex, Cursor 등으로 앱을 빠르게 만들었지만, 클라우드나 서버 설정 없이 바로 실제 사용자에게 보여주고 싶을 때 사용합니다.
+Claude Code, Codex, Cursor 등으로 앱을 빠르게 만들었다면 앱의 코드·데이터·실행 환경을 먼저 내 컴퓨터에 둔 채 실제 사용자에게 보여줄 수 있습니다.
 
 ```text
 AI로 앱 개발 → 내 PC에서 실행 → minit run → URL 공유 → 실제 사용자 테스트
@@ -136,6 +155,8 @@ minit run
 
 생성된 링크를 사용자에게 보내면 됩니다. **내 PC가 첫 번째 서버**가 되고, PC를 끄면 서비스도 종료됩니다.
 
+장기 방향은 앱의 실행·모니터링·버전·백업·공유·이동을 Minit이 관리하되, 앱 코드·데이터·secret·암호화 key의 control은 로컬에 두는 것입니다.
+
 ## 보안 — 현재 MVP
 
 `minit run`을 실행하면 로컬 앱이 인터넷에서 접근 가능해집니다. 생성된 URL은 **공개 URL**이라고 생각하는 것이 안전합니다.
@@ -143,12 +164,6 @@ minit run
 현재 MVP에서는 비밀번호·API Key·개인정보·회사 내부자료 등 민감한 정보가 들어 있는 앱은 공개하지 않는 것을 권장합니다. 인증이 필요한 앱이라면 Minit으로 공개하기 전에 앱 자체에 인증을 구현해야 합니다. 특히 AI로 생성한 앱은 hard-coded API key, debug endpoint, 의도하지 않은 파일·데이터 접근이 없는지 확인한 뒤 공유하세요.
 
 현재 Minit은 민감하거나 production 용도보다는 **가벼운 prototype과 초기 사용자 테스트**를 위한 도구입니다.
-
-Minit의 첫 번째 목표는 단순합니다.
-
-> **AI로 만든 앱을 localhost에서 실제 사용자에게 가장 쉽게 보여주는 것.**
-
-가입도, 별도 서버도, 클라우드 설정도 최대한 필요 없게 만드는 것을 지향합니다.
 
 ## License
 
