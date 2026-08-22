@@ -1,0 +1,127 @@
+name: PR Live CSV Minit Dogfood
+
+on:
+  pull_request:
+    paths:
+      - "dogfood-trigger-csv.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install current Minit
+        run: python -m pip install -e .
+
+      - name: Build CSV analysis app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/minit-csv
+          cat >/tmp/minit-csv/app.py <<'PY'
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          import csv, io, json, statistics
+
+          HTML = r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Minit CSV Analyzer</title><style>
+          *{box-sizing:border-box}body{margin:0;background:#0b0f16;color:#edf2fa;font:15px system-ui,-apple-system,sans-serif}.w{max-width:1080px;margin:auto;padding:32px}.tag{color:#7ea6ff;font-size:12px;font-weight:800;letter-spacing:.13em}h1{font-size:40px;margin:7px 0 4px}.sub{color:#9ba8bd;max-width:760px}.notice{margin:18px 0;padding:12px 15px;border:1px solid #574b27;background:#211d10;color:#e9d889;border-radius:11px}.upload{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:22px 0}.btn,label.btn{display:inline-block;border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer;background:#6f8fff;color:white}.ghost{background:#1a2332!important;border:1px solid #35435a!important}.file{display:none}.status{color:#8fa0b8}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}.c,.panel{background:#121a25;border:1px solid #273448;border-radius:15px;padding:18px}.k{font-size:11px;color:#8d9db5;font-weight:700;letter-spacing:.08em}.v{font-size:28px;font-weight:800;margin-top:7px}.grid{display:grid;grid-template-columns:1.1fr .9fr;gap:13px}.metrics{overflow:auto}.metric{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:9px;padding:11px 0;border-bottom:1px solid #263246;min-width:560px}.metric.head{color:#8393aa;font-size:11px;font-weight:700}.chart{height:280px;display:flex;align-items:end;gap:5px;padding-top:25px}.bar{flex:1;background:linear-gradient(#83a2ff,#526ce0);border-radius:5px 5px 2px 2px;min-height:3px}.table{overflow:auto}.table table{border-collapse:collapse;width:100%;font-size:12px}.table td,.table th{padding:8px;border-bottom:1px solid #263246;text-align:left;white-space:nowrap}.local{color:#71dc9d;font-weight:700}@media(max-width:760px){.cards{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}</style></head><body><div class=w><div class=tag>MINIT · LOCAL DOGFOOD #3</div><h1>CSV Analysis Workspace</h1><div class=sub>Upload a CSV and the Minit-managed Python process on this machine computes the summary. Try the built-in sample first.</div><div class=notice>Demo tunnel only: do not upload sensitive files. Current <b>minit run</b> uses a temporary Cloudflare path; private E2E sharing is not implemented yet.</div><div class=upload><label class=btn>Choose CSV<input id=file class=file type=file accept=.csv,text/csv></label><button class="btn ghost" id=sample>Use sample sales CSV</button><span class=status id=status>Ready</span></div><div id=result style="display:none"><div class=cards><div class=c><div class=k>ROWS</div><div id=rows class=v>—</div></div><div class=c><div class=k>COLUMNS</div><div id=cols class=v>—</div></div><div class=c><div class=k>NUMERIC COLUMNS</div><div id=nums class=v>—</div></div><div class=c><div class=k>COMPUTE</div><div class=v local>LOCAL</div></div></div><div class=grid><div class=panel><div class=k>NUMERIC SUMMARY</div><div id=metrics class=metrics></div></div><div class=panel><div class=k id=charttitle>FIRST NUMERIC COLUMN</div><div id=chart class=chart></div></div></div><div class=panel style="margin-top:13px"><div class=k>SAMPLE ROWS</div><div id=preview class=table></div></div></div></div><script>
+          const sample=`date,region,orders,revenue,returns\n2026-08-01,Seoul,124,18600000,3\n2026-08-02,Seoul,139,21100000,4\n2026-08-03,Busan,91,13700000,2\n2026-08-04,Daejeon,77,11200000,1\n2026-08-05,Seoul,151,22600000,5\n2026-08-06,Busan,104,15400000,2\n2026-08-07,Jeju,68,9800000,1\n2026-08-08,Seoul,163,24100000,3\n2026-08-09,Daejeon,88,12900000,2\n2026-08-10,Busan,117,17100000,2\n2026-08-11,Seoul,172,25300000,4\n2026-08-12,Jeju,73,10600000,1`;
+          async function analyze(text,name){status.textContent='Analyzing on local process…';let r=await fetch('/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv:text,name})});let x=await r.json();if(!r.ok){status.textContent=x.error||'Analysis failed';return}status.textContent='Analyzed: '+name;result.style.display='block';rows.textContent=x.rows;cols.textContent=x.columns.length;nums.textContent=x.numeric.length;metrics.innerHTML='<div class="metric head"><span>COLUMN</span><span>AVG</span><span>MIN</span><span>MAX</span><span>SUM</span></div>'+x.numeric.map(n=>`<div class=metric><b>${n.name}</b><span>${fmt(n.avg)}</span><span>${fmt(n.min)}</span><span>${fmt(n.max)}</span><span>${fmt(n.sum)}</span></div>`).join('');chart.innerHTML='';if(x.chart){charttitle.textContent='DISTRIBUTION · '+x.chart.name;let mx=Math.max(...x.chart.values,1);x.chart.values.forEach(v=>{let b=document.createElement('i');b.className='bar';b.style.height=(8+88*v/mx)+'%';b.title=String(v);chart.appendChild(b)})}preview.innerHTML='<table><thead><tr>'+x.columns.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+x.preview.map(row=>'<tr>'+row.map(v=>'<td>'+esc(String(v))+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
+          function fmt(v){return Math.abs(v)>=1000000?(v/1000000).toFixed(1)+'M':Math.abs(v)>=1000?(v/1000).toFixed(1)+'K':Number(v).toFixed(2)}function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}sample.onclick=()=>analyze(sample,'sample-sales.csv');file.onchange=async()=>{let f=file.files[0];if(f)analyze(await f.text(),f.name)}</script></body></html>'''
+
+          def analyze_csv(text):
+              if len(text.encode('utf-8')) > 2_000_000:
+                  raise ValueError('CSV is too large for this demo (2 MB max).')
+              reader=csv.reader(io.StringIO(text))
+              rows=list(reader)
+              if len(rows)<2: raise ValueError('CSV needs a header and at least one data row.')
+              header=[h.strip() or f'column_{i+1}' for i,h in enumerate(rows[0])]
+              data=[r[:len(header)]+['']*max(0,len(header)-len(r)) for r in rows[1:] if any(c.strip() for c in r)]
+              if len(data)>5000: data=data[:5000]
+              numeric=[]
+              for i,name in enumerate(header):
+                  vals=[]; valid=True
+                  for r in data:
+                      s=r[i].strip()
+                      if not s: continue
+                      try: vals.append(float(s.replace(',','')))
+                      except ValueError: valid=False; break
+                  if valid and vals:
+                      numeric.append({'name':name,'avg':sum(vals)/len(vals),'min':min(vals),'max':max(vals),'sum':sum(vals),'values':vals[:40]})
+              chart=None
+              if numeric: chart={'name':numeric[0]['name'],'values':numeric[0].pop('values')}
+              for n in numeric: n.pop('values',None)
+              return {'rows':len(data),'columns':header,'numeric':numeric,'chart':chart,'preview':data[:8]}
+
+          class H(BaseHTTPRequestHandler):
+              def send_json(self,obj,status=200):
+                  body=json.dumps(obj).encode(); self.send_response(status); self.send_header('Content-Type','application/json'); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(body)
+              def do_GET(self):
+                  body=HTML.encode(); self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(body)
+              def do_POST(self):
+                  if self.path!='/analyze': self.send_error(404); return
+                  try:
+                      n=int(self.headers.get('Content-Length','0'))
+                      if n>2_200_000: raise ValueError('Request too large for demo.')
+                      payload=json.loads(self.rfile.read(n)); result=analyze_csv(payload.get('csv','')); result['name']=payload.get('name','upload.csv'); self.send_json(result)
+                  except Exception as e: self.send_json({'error':str(e)},400)
+              def log_message(self,*args): pass
+          ThreadingHTTPServer(('127.0.0.1',8841),H).serve_forever()
+          PY
+
+      - name: Deploy CSV analyzer with Minit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/minit-csv
+          minit deploy -p 8841 -- python app.py
+          curl -fsS http://127.0.0.1:8841 | grep -q 'CSV Analysis Workspace'
+          curl -fsS -X POST -H 'Content-Type: application/json' --data '{"name":"smoke.csv","csv":"x,y\\n1,2\\n3,4"}' http://127.0.0.1:8841/analyze | grep -q 'numeric'
+          minit status
+
+      - name: Create and verify public URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/minit-csv
+          minit run -p 8841 >/tmp/csv-tunnel.log 2>&1 &
+          python - <<'PY'
+          import pathlib,re,time,sys,urllib.request,json
+          p=pathlib.Path('/tmp/csv-tunnel.log'); pat=re.compile(r'https://[\w-]+\.trycloudflare\.com'); end=time.time()+150; url=None
+          while time.time()<end:
+              if p.exists():
+                  m=pat.search(p.read_text(errors='ignore'))
+                  if m: url=m.group(0); break
+              time.sleep(2)
+          if not url:
+              print(p.read_text(errors='ignore')); sys.exit('no URL')
+          for _ in range(15):
+              try:
+                  html=urllib.request.urlopen(url,timeout=5).read().decode(errors='ignore')
+                  if 'CSV Analysis Workspace' in html: break
+              except Exception: pass
+              time.sleep(2)
+          else: sys.exit('public URL did not verify')
+          req=urllib.request.Request(url+'/analyze',data=json.dumps({'name':'smoke.csv','csv':'x,y\n1,2\n3,4'}).encode(),headers={'Content-Type':'application/json'},method='POST')
+          body=urllib.request.urlopen(req,timeout=10).read().decode()
+          if 'numeric' not in body: sys.exit('public POST analysis failed')
+          pathlib.Path('/tmp/live-url.txt').write_text(url+'\n')
+          print('MINIT_CSV_PUBLIC_URL='+url,flush=True)
+          print('MINIT_CSV_PUBLIC_ANALYSIS=PASS',flush=True)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minit-csv-live-url
+          path: /tmp/live-url.txt
+          retention-days: 1
+
+      - name: Keep URL alive for interactive testing
+        run: sleep 1800
