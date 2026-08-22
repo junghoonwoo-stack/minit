@@ -18,53 +18,95 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install and test
-        id: validation
-        continue-on-error: true
+      - name: Run diagnostic validation
         shell: bash
         run: |
-          set -euxo pipefail
+          LOG=/tmp/local-deploy-validation.txt
+          : > "$LOG"
+          exec > >(tee -a "$LOG") 2>&1
+          set +e
+
+          echo "=== install ==="
           python -m pip install -e ".[dev]"
+          install_rc=$?
+
+          echo "=== pytest ==="
           pytest -q
+          test_rc=$?
 
-          mkdir -p /tmp/minit-local-deploy-e2e
-          cd /tmp/minit-local-deploy-e2e
-
-          minit deploy --port 8765 -- python -m http.server 8765 --bind 127.0.0.1
-
+          deploy_rc=99
           ready=0
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8765 >/dev/null; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          test "$ready" -eq 1
-
-          # The deploy command has already exited. The managed process must still live.
-          minit status | tee /tmp/minit-status.txt
-          grep -q "process:         running" /tmp/minit-status.txt
-          grep -q "health:          healthy" /tmp/minit-status.txt
-
-          minit stop
+          status_rc=99
+          status_running=1
+          status_healthy=1
+          stop_rc=99
           stopped=0
-          for i in $(seq 1 20); do
-            if ! curl -fsS http://127.0.0.1:8765 >/dev/null 2>&1; then
-              stopped=1
-              break
-            fi
-            sleep 0.5
-          done
-          test "$stopped" -eq 1
 
-      - name: Record result
-        shell: bash
-        run: |
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ]; then
+            echo "=== local deploy e2e ==="
+            rm -rf /tmp/minit-local-deploy-e2e
+            mkdir -p /tmp/minit-local-deploy-e2e
+            cd /tmp/minit-local-deploy-e2e
+
+            minit deploy --port 8765 -- python -m http.server 8765 --bind 127.0.0.1
+            deploy_rc=$?
+
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8765 >/dev/null; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+
+            echo "=== status ==="
+            minit status | tee /tmp/minit-status.txt
+            status_rc=${PIPESTATUS[0]}
+            grep -q "process:         running" /tmp/minit-status.txt
+            status_running=$?
+            grep -q "health:          healthy" /tmp/minit-status.txt
+            status_healthy=$?
+
+            echo "=== supervisor log ==="
+            cat .minit/logs/supervisor.log 2>/dev/null || true
+            echo "=== app log ==="
+            cat .minit/logs/app.log 2>/dev/null || true
+            echo "=== runtime state ==="
+            cat .minit/runtime.json 2>/dev/null || true
+
+            echo "=== stop ==="
+            minit stop
+            stop_rc=$?
+            for i in $(seq 1 20); do
+              if ! curl -fsS http://127.0.0.1:8765 >/dev/null 2>&1; then
+                stopped=1
+                break
+              fi
+              sleep 0.5
+            done
+          fi
+
+          echo "=== summary ==="
+          echo "install_rc=$install_rc"
+          echo "test_rc=$test_rc"
+          echo "deploy_rc=$deploy_rc"
+          echo "ready=$ready"
+          echo "status_rc=$status_rc"
+          echo "status_running=$status_running"
+          echo "status_healthy=$status_healthy"
+          echo "stop_rc=$stop_rc"
+          echo "stopped=$stopped"
+
+          overall=failure
+          if [ "$install_rc" -eq 0 ] && [ "$test_rc" -eq 0 ] && [ "$deploy_rc" -eq 0 ] && [ "$ready" -eq 1 ] && [ "$status_rc" -eq 0 ] && [ "$status_running" -eq 0 ] && [ "$status_healthy" -eq 0 ] && [ "$stop_rc" -eq 0 ] && [ "$stopped" -eq 1 ]; then
+            overall=success
+          fi
+          echo "result=$overall"
+
           cd "$GITHUB_WORKSPACE"
-          echo "${{ steps.validation.outcome }}" > local-deploy-validation.txt
+          cp "$LOG" local-deploy-validation.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add local-deploy-validation.txt
-          git commit -m "Record local deploy validation result" || true
+          git commit -m "Record local deploy diagnostic result" || true
           git push
