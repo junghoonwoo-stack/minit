@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Minit — From localhost to real users</title>
-  <meta name="description" content="Minit turns a locally running web app into a temporary public URL. Your PC is the first server.">
+  <meta name="description" content="Minit makes local software easy to share and, over time, manage without making cloud compute the default runtime.">
   <meta name="theme-color" content="#0b0d10">
   <meta property="og:title" content="Minit — From localhost to real users">
-  <meta property="og:description" content="Run one command. Share your local app. Your PC is the first server.">
+  <meta property="og:description" content="Your PC is the first server. Share local apps now; keep local software manageable over time.">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -25,7 +25,7 @@
     <section class="hero">
       <p class="eyebrow">OPEN SOURCE · APACHE 2.0</p>
       <h1>From localhost to<br><span>real users</span> in one command.</h1>
-      <p class="lede">Minit gives a web app already running on your computer a temporary public URL. No account. No cloud setup. Your app stays on your PC.</p>
+      <p class="lede">Minit gives a web app already running on your computer a temporary public URL. No account. No cloud compute setup. Your application stays on your PC.</p>
       <div class="actions">
         <a class="primary" href="#install">Install Minit</a>
         <a class="secondary" href="https://github.com/junghoonwoo-stack/minit">View on GitHub ↗</a>
@@ -67,7 +67,16 @@ uv tool install minit-runtime</code></pre>
     <section class="flow">
       <p class="eyebrow">THE WHOLE IDEA</p>
       <div class="flowline"><b>Build</b><i>→</i><b>localhost</b><i>→</i><strong>minit run</strong><i>→</i><b>share</b><i>→</i><b>learn</b></div>
-      <p>AI coding made building small software cheap. Getting it in front of another person should be just as lightweight.</p>
+      <p>AI coding made building small software cheap. Running that software for a few real people should not automatically require moving it into cloud infrastructure.</p>
+    </section>
+
+    <section class="security">
+      <div>
+        <p class="eyebrow">LOCAL FIRST</p>
+        <h2>Run local software. Manage it like the cloud.</h2>
+      </div>
+      <p>Minit's direction is to manage lifecycle, connectivity, observation, versioning, backup, sharing, and machine migration around a local runtime. Code, data, secrets, keys, and execution should remain under local control by default. Any future coordination service should be designed around ciphertext and minimal routing metadata rather than application plaintext.</p>
+      <a href="https://github.com/junghoonwoo-stack/minit/blob/main/docs/ARCHITECTURE.md">Read the architecture →</a>
     </section>
 
     <section class="try" id="try">
