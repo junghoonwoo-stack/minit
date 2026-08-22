@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "minit-runtime"
-version = "0.1.0"
-description = "From localhost to real users in one command."
+version = "0.2.0.dev0"
+description = "Run and manage local apps from your own computer."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [{name = "Junghoon Woo"}]
-keywords = ["localhost", "developer-tools", "tunnel", "deployment", "ai-coding", "prototyping"]
+keywords = ["localhost", "developer-tools", "local-first", "tunnel", "ai-coding", "prototyping"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -37,7 +37,7 @@ Issues = "https://github.com/junghoonwoo-stack/minit/issues"
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-minit = "minit.cli:app"
+minit = "minit.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["minit"]
