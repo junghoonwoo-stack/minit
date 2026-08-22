@@ -21,6 +21,7 @@ def test_service_spec_is_local_and_contains_no_secret_values(tmp_path: Path):
     assert spec["port"] == 8000
     assert spec["working_dir"] == str(tmp_path.resolve())
     assert spec["restart_policy"] == "on-failure"
+    assert spec["environment_policy"] == "minimal"
     assert spec["autostart"] is False
     assert "env" not in spec
     assert "secrets" not in spec
@@ -50,3 +51,16 @@ def test_service_spec_rejects_unknown_restart_policy(tmp_path: Path):
             tmp_path,
             restart_policy="sometimes",
         )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["python", "app.py", "--api-key=plaintext-secret"],
+        ["python", "app.py", "--token", "plaintext-secret"],
+        ["python", "app.py", "--password=plaintext-secret"],
+    ],
+)
+def test_service_spec_rejects_obvious_secret_arguments(tmp_path: Path, command: list[str]):
+    with pytest.raises(ValueError, match="secret argument"):
+        build_service_spec(command, 8000, tmp_path)
