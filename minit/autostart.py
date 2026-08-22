@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from minit.private_fs import atomic_write_bytes, atomic_write_text, ensure_private_dir
 from minit.service import load_service_spec, save_service_spec
 
 
@@ -87,8 +88,6 @@ def render_macos_plist(project_dir: Path, python_executable: str | None = None) 
         "Label": macos_label(spec["app_id"]),
         "ProgramArguments": [executable, "-m", "minit.supervisor", str(root)],
         "RunAtLoad": True,
-        # Restart only if the supervisor itself exits abnormally. A deliberate
-        # local `minit stop` should not immediately resurrect the process.
         "KeepAlive": {"SuccessfulExit": False},
         "WorkingDirectory": str(root),
     }
@@ -120,8 +119,6 @@ def autostart_info(project_dir: Path | None = None, system: str | None = None) -
         path = macos_plist_path(spec["app_id"])
         return AutostartInfo(platform_name, macos_label(spec["app_id"]), path, path.exists())
     if platform_name == "Windows":
-        # Querying Task Scheduler is deliberately avoided in the pure status
-        # helper; installation code reports failures explicitly.
         return AutostartInfo(platform_name, windows_task_name(spec["app_id"]), None, bool(spec.get("autostart")))
 
     raise AutostartUnavailable(f"Autostart is not supported on {platform_name} yet.")
@@ -142,8 +139,8 @@ def enable_autostart(project_dir: Path | None = None) -> AutostartInfo:
         if not shutil_which("systemctl"):
             raise AutostartUnavailable("systemctl is not available for user-level autostart.")
         path = linux_unit_path(spec["app_id"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_linux_unit(root), encoding="utf-8")
+        ensure_private_dir(path.parent)
+        atomic_write_text(path, render_linux_unit(root))
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "--user", "enable", path.name], check=True)
         _mark_autostart(root, True)
@@ -151,10 +148,8 @@ def enable_autostart(project_dir: Path | None = None) -> AutostartInfo:
 
     if system == "Darwin":
         path = macos_plist_path(spec["app_id"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(render_macos_plist(root))
-        if os.name != "nt":
-            path.chmod(0o600)
+        ensure_private_dir(path.parent)
+        atomic_write_bytes(path, render_macos_plist(root))
         _mark_autostart(root, True)
         return AutostartInfo(system, macos_label(spec["app_id"]), path, True)
 
@@ -162,17 +157,7 @@ def enable_autostart(project_dir: Path | None = None) -> AutostartInfo:
         command = windows_supervisor_command(root)
         task_name = windows_task_name(spec["app_id"])
         subprocess.run(
-            [
-                "schtasks",
-                "/Create",
-                "/F",
-                "/SC",
-                "ONLOGON",
-                "/TN",
-                task_name,
-                "/TR",
-                command,
-            ],
+            ["schtasks", "/Create", "/F", "/SC", "ONLOGON", "/TN", task_name, "/TR", command],
             check=True,
         )
         _mark_autostart(root, True)
@@ -190,8 +175,9 @@ def disable_autostart(project_dir: Path | None = None) -> AutostartInfo:
         path = linux_unit_path(spec["app_id"])
         if shutil_which("systemctl"):
             subprocess.run(["systemctl", "--user", "disable", path.name], check=False)
-            subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
         path.unlink(missing_ok=True)
+        if shutil_which("systemctl"):
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
         _mark_autostart(root, False)
         return AutostartInfo(system, path.name, path, False)
 
@@ -211,8 +197,6 @@ def disable_autostart(project_dir: Path | None = None) -> AutostartInfo:
 
 
 def shutil_which(command: str) -> str | None:
-    # Local wrapper keeps the platform module easy to unit-test without exposing
-    # the rest of Minit's runtime helpers.
     import shutil
 
     return shutil.which(command)
