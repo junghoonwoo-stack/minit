@@ -90,10 +90,21 @@ def get_secret(
 ) -> str | None:
     _validate_name(name)
     root = (project_dir or Path.cwd()).resolve()
+    manifest, _ = ensure_manifest(root)
     envelopes = _load_secret_envelopes(root)
     envelope = envelopes.get(name)
     if envelope is None:
         return None
+
+    expected_context = {
+        "type": "app-secret",
+        "app_id": manifest["id"],
+        "name": name,
+    }
+    if envelope.get("context") != expected_context:
+        raise RuntimeError(
+            f"Local secret {name} is not bound to this app/name as expected."
+        )
 
     app_key = get_or_create_app_key(root, store=store)
     try:
