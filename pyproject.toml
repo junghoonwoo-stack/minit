@@ -40,7 +40,7 @@ Issues = "https://github.com/junghoonwoo-stack/minit/issues"
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-minit = "minit.main:app"
+minit = "minit.commands:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["minit"]
