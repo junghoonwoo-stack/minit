@@ -12,6 +12,7 @@ from typing import Any
 
 from minit.environment import app_environment
 from minit.monitoring import ProcessMonitor
+from minit.private_fs import ensure_private_dir, ensure_private_file
 from minit.runtime import app_log_path, clear_control, read_control, save_runtime_state
 from minit.service import load_service_spec
 
@@ -96,7 +97,12 @@ def supervise(project_dir: Path) -> int:
         return 2
 
     clear_control(root)
-    app_log_path(root).parent.mkdir(parents=True, exist_ok=True)
+    log_path = app_log_path(root)
+    ensure_private_dir(log_path.parent)
+    if not log_path.exists():
+        log_path.touch(mode=0o600, exist_ok=True)
+    ensure_private_file(log_path)
+
     state = _base_state(spec, os.getpid())
     save_runtime_state(state, root)
 
@@ -138,7 +144,7 @@ def supervise(project_dir: Path) -> int:
         return process
 
     try:
-        with app_log_path(root).open("ab", buffering=0) as app_log:
+        with log_path.open("ab", buffering=0) as app_log:
             app_process = start_app(app_log)
             app_started_monotonic = time.monotonic()
 
@@ -178,8 +184,6 @@ def supervise(project_dir: Path) -> int:
                     state["status"] = "running"
                     state["health"] = "healthy"
                 elif time.monotonic() - app_started_monotonic >= STARTUP_GRACE_SECONDS:
-                    # Do not kill a process solely because its configured port is
-                    # not yet healthy. Surface the condition locally first.
                     state["status"] = "degraded"
                     state["health"] = "port-unreachable"
                 else:
