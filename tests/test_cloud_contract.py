@@ -11,6 +11,36 @@ from minit.service import configure_local_service
 from minit.state import ensure_manifest
 
 
+def _base_payload() -> dict:
+    return {
+        "schema_version": 1,
+        "app_id": "app",
+        "device_id": "device",
+        "observed_at": "2026-08-22T00:00:00+00:00",
+        "service": {
+            "configured": False,
+            "running": False,
+            "status": "not-configured",
+            "health": "unknown",
+            "restart_count": 0,
+            "autostart": False,
+        },
+        "resources": {
+            "available": False,
+            "cpu_percent": None,
+            "rss_bytes": None,
+            "child_processes": None,
+        },
+        "history": {"successful_runs": 0, "total_live_seconds": 0},
+        "backup": {
+            "available": False,
+            "backup_id": None,
+            "created_at": None,
+            "ciphertext_bytes": None,
+        },
+    }
+
+
 def test_cloud_payload_excludes_sensitive_local_details(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cloud_contract, "get_or_create_device_id", lambda: "device-opaque")
     manifest, _ = ensure_manifest(tmp_path)
@@ -31,56 +61,16 @@ def test_cloud_payload_excludes_sensitive_local_details(tmp_path: Path, monkeypa
 
 
 def test_cloud_payload_rejects_unknown_fields():
-    payload = {
-        "schema_version": 1,
-        "app_id": "app",
-        "device_id": "device",
-        "observed_at": "2026-08-22T00:00:00+00:00",
-        "service": {
-            "configured": False,
-            "running": False,
-            "status": "not-configured",
-            "health": "unknown",
-            "restart_count": 0,
-            "autostart": False,
-        },
-        "resources": {
-            "available": False,
-            "cpu_percent": None,
-            "rss_bytes": None,
-            "child_processes": None,
-        },
-        "history": {"successful_runs": 0, "total_live_seconds": 0},
-        "app_name": "should-never-leave-device",
-    }
+    payload = _base_payload()
+    payload["app_name"] = "should-never-leave-device"
 
     with pytest.raises(ValueError, match="non-allowlisted"):
         validate_cloud_status_payload(payload)
 
 
 def test_cloud_payload_rejects_nested_sensitive_extension():
-    payload = {
-        "schema_version": 1,
-        "app_id": "app",
-        "device_id": "device",
-        "observed_at": "2026-08-22T00:00:00+00:00",
-        "service": {
-            "configured": False,
-            "running": False,
-            "status": "not-configured",
-            "health": "unknown",
-            "restart_count": 0,
-            "autostart": False,
-            "raw_logs": "oops",
-        },
-        "resources": {
-            "available": False,
-            "cpu_percent": None,
-            "rss_bytes": None,
-            "child_processes": None,
-        },
-        "history": {"successful_runs": 0, "total_live_seconds": 0},
-    }
+    payload = _base_payload()
+    payload["service"]["raw_logs"] = "oops"
 
     with pytest.raises(ValueError, match="non-allowlisted"):
         validate_cloud_status_payload(payload)
