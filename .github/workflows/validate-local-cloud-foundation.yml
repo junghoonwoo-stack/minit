@@ -1,0 +1,41 @@
+name: Validate local cloud foundation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-local-cloud-foundation.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate tests and privacy-safe CLI
+        id: validation
+        continue-on-error: true
+        run: |
+          python -m pip install -e ".[dev]"
+          pytest -q
+          rm -rf /tmp/minit-cloud-preview
+          mkdir -p /tmp/minit-cloud-preview
+          cd /tmp/minit-cloud-preview
+          minit cloud preview > /tmp/cloud-preview.txt
+          grep -q '"app_id"' /tmp/cloud-preview.txt
+          grep -q '"backup"' /tmp/cloud-preview.txt
+          ! grep -q 'working_dir' /tmp/cloud-preview.txt
+          minit backup --help >/dev/null
+      - name: Record result
+        run: |
+          echo "${{ steps.validation.outcome }}" > local-cloud-foundation-validation.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add local-cloud-foundation-validation.txt
+          git commit -m "Record local cloud foundation validation" || true
+          git push
