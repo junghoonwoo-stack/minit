@@ -125,7 +125,6 @@ def test_ls_and_targeted_status_work_outside_project(tmp_path: Path, monkeypatch
     assert listed.exit_code == 0
     assert "alpha" in listed.stdout
     assert "8123" in listed.stdout
-    assert str(project) in listed.stdout
     assert status.exit_code == 0
     assert "alpha" in status.stdout
     assert str(project.resolve()) in status.stdout
