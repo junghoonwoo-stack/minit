@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import platform
 import shutil
@@ -137,44 +136,17 @@ def _macos_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     )
 
 
-def _fallback_appcontainer_sid(app_id: str) -> str:
-    # Used only for deterministic non-Windows planning/tests. Real Windows uses
-    # DeriveAppContainerSidFromAppContainerName so the SID is recognized by ACL APIs.
-    digest = hashlib.sha256(app_id.encode("utf-8")).digest()
-    parts = [int.from_bytes(digest[i : i + 4], "little") for i in range(0, 28, 4)]
-    return "S-1-15-2-" + "-".join(str(part) for part in parts)
-
-
 def windows_app_sid(app_id: str) -> str:
-    if platform.system() != "Windows":
-        return _fallback_appcontainer_sid(app_id)
+    """Return a deterministic non-account SID usable as an app capability.
 
-    userenv = ctypes.WinDLL("userenv", use_last_error=True)
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    sid_ptr = ctypes.c_void_p()
-    name = "minit." + app_id.lower().replace("-", "")
-    derive = userenv.DeriveAppContainerSidFromAppContainerName
-    derive.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
-    derive.restype = ctypes.c_long
-    hr = int(derive(name, ctypes.byref(sid_ptr)))
-    if hr != 0 or not sid_ptr.value:
-        raise SandboxUnavailable(f"Could not derive Windows AppContainer SID (HRESULT 0x{hr & 0xFFFFFFFF:08x}).")
-
-    string_ptr = ctypes.c_wchar_p()
-    convert = advapi32.ConvertSidToStringSidW
-    convert.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
-    convert.restype = ctypes.c_int
-    try:
-        if not convert(sid_ptr, ctypes.byref(string_ptr)):
-            raise SandboxUnavailable(
-                f"Could not stringify Windows AppContainer SID (WinError {ctypes.get_last_error()})."
-            )
-        return str(string_ptr.value)
-    finally:
-        if string_ptr:
-            kernel32.LocalFree(string_ptr)
-        advapi32.FreeSid(sid_ptr)
+    SECURITY_NON_UNIQUE_AUTHORITY (S-1-4) is intended for SIDs whose identity is
+    defined by the application rather than an account database. Using a raw
+    capability SID avoids creating local users/groups and is accepted by NTFS
+    ACLs and CreateRestrictedToken's restricting-SID list.
+    """
+    digest = hashlib.sha256(("minit-app-capability-v1:" + app_id).encode("utf-8")).digest()
+    parts = [int.from_bytes(digest[i : i + 4], "little") for i in range(0, 16, 4)]
+    return "S-1-4-" + "-".join(str(part) for part in parts)
 
 
 def _run_icacls(args: list[str]) -> None:
@@ -210,8 +182,8 @@ def prepare_windows_sandbox_acl(project_dir: Path, app_id: str) -> str:
     for broad_sid in ("*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"):
         _run_icacls([str(root), "/remove:g", broad_sid])
 
-    # Remove the app SID from all manager-owned state before granting only
-    # directory traversal and a writable mutable-data subtree.
+    # Remove the app capability from all manager-owned state before granting
+    # only directory traversal and a writable mutable-data subtree.
     if minit_dir.exists():
         _run_icacls([str(minit_dir), "/remove", sid_arg, "/T", "/C"])
         _run_icacls([str(minit_dir), "/grant", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F"])
