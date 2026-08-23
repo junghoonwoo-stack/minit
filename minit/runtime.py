@@ -113,6 +113,18 @@ def runtime_is_running(project_dir: Path | None = None) -> bool:
     return bool(state and pid_is_alive(state.get("supervisor_pid")))
 
 
+def _is_fresh_runtime_generation(
+    state: dict[str, Any] | None,
+    *,
+    app_id: str,
+    previous_started_at: str | None,
+) -> bool:
+    if not state or state.get("app_id") != app_id:
+        return False
+    started_at = state.get("started_at")
+    return bool(started_at and started_at != previous_started_at)
+
+
 def _force_terminate(pid: int | None) -> None:
     if not pid or not pid_is_alive(pid):
         return
@@ -148,6 +160,9 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
     if runtime_is_running(root):
         raise RuntimeError("The local service is already running.")
 
+    previous_state = load_runtime_state(root)
+    previous_started_at = previous_state.get("started_at") if previous_state else None
+
     clear_control(root)
     ensure_private_dir(logs_dir(root))
 
@@ -172,7 +187,12 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         state = load_runtime_state(root)
-        if state and state.get("supervisor_pid") == process.pid:
+        fresh = _is_fresh_runtime_generation(
+            state,
+            app_id=str(spec["app_id"]),
+            previous_started_at=previous_started_at,
+        )
+        if fresh and state is not None:
             status = state.get("status")
             if status == "failed":
                 raise RuntimeError(state.get("error") or "Local supervisor failed to start.")
@@ -181,7 +201,15 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
             if status == "stopped":
                 exit_code = state.get("last_exit_code")
                 raise RuntimeError(f"The app stopped during startup (exit code {exit_code}).")
+
         if process.poll() is not None:
+            # On Windows, a Python launcher/redirector PID is not a reliable
+            # identity for the long-lived detached supervisor. If a fresh
+            # runtime generation has already appeared and its recorded
+            # supervisor is alive, continue waiting for its health state.
+            if fresh and state is not None and pid_is_alive(state.get("supervisor_pid")):
+                time.sleep(0.1)
+                continue
             raise RuntimeError("Local supervisor exited during startup.")
         time.sleep(0.1)
 
