@@ -1,4 +1,5 @@
 name: Windows dogfood simulations
+# validation marker: Windows dogfood simulation run
 
 on:
   push:
