@@ -37,6 +37,22 @@ def test_minimal_environment_does_not_inherit_arbitrary_credentials():
     assert "DATABASE_URL" not in env
 
 
+def test_minimal_environment_preserves_windows_systemroot():
+    source = {
+        "PATH": r"C:\\Windows\\System32",
+        "SYSTEMROOT": r"C:\\Windows",
+        "WINDIR": r"C:\\Windows",
+        "USERPROFILE": r"C:\\Users\\demo",
+        "OPENAI_API_KEY": "must-not-leak",
+    }
+
+    env = minimal_environment(source)
+
+    assert env["SYSTEMROOT"] == r"C:\\Windows"
+    assert env["WINDIR"] == r"C:\\Windows"
+    assert "OPENAI_API_KEY" not in env
+
+
 def test_app_environment_contains_only_explicit_minit_secret(tmp_path: Path):
     store = MemoryKeyStore()
     manifest = create_manifest(tmp_path, name="demo")
