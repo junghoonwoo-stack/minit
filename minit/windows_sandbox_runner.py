@@ -56,6 +56,60 @@ if os.name == "nt":
             ("dwThreadId", wintypes.DWORD),
         ]
 
+    # ctypes defaults return values to 32-bit c_int. Explicit signatures are
+    # required for HANDLE/pointer APIs on 64-bit Windows; otherwise pseudo-
+    # handles such as GetCurrentProcess() can be truncated and become invalid.
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.ConvertStringSidToSidW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    advapi32.ConvertStringSidToSidW.restype = wintypes.BOOL
+    advapi32.CreateRestrictedToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(SID_AND_ATTRIBUTES),
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(SID_AND_ATTRIBUTES),
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.CreateRestrictedToken.restype = wintypes.BOOL
+    advapi32.CreateProcessAsUserW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPCWSTR,
+        wintypes.LPWSTR,
+        wintypes.LPVOID,
+        wintypes.LPVOID,
+        wintypes.BOOL,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.LPCWSTR,
+        ctypes.POINTER(STARTUPINFOW),
+        ctypes.POINTER(PROCESS_INFORMATION),
+    ]
+    advapi32.CreateProcessAsUserW.restype = wintypes.BOOL
+
 
 def _raise_last_error(action: str) -> None:
     code = ctypes.get_last_error()
@@ -112,7 +166,7 @@ def _create_restricted_token(app_sid: str) -> wintypes.HANDLE:
     finally:
         kernel32.CloseHandle(current)
         for sid in allocated:
-            kernel32.LocalFree(sid)
+            kernel32.LocalFree(ctypes.cast(sid, wintypes.HLOCAL))
 
 
 def _run_restricted(app_sid: str, cwd: str, command: list[str]) -> int:
@@ -136,7 +190,7 @@ def _run_restricted(app_sid: str, cwd: str, command: list[str]) -> int:
             None,
             True,
             CREATE_UNICODE_ENVIRONMENT,
-            ctypes.byref(env_block),
+            ctypes.cast(env_block, wintypes.LPVOID),
             cwd,
             ctypes.byref(startup),
             ctypes.byref(info),
