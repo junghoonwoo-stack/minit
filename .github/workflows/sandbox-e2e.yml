@@ -82,7 +82,19 @@ jobs:
           ThreadingHTTPServer(("127.0.0.1", 9341), H).serve_forever()
           PY
           cd "$APP"
+          set +e
           minit deploy --port 9341 -- python probe.py
+          DEPLOY_CODE=$?
+          set -e
+          if [ "$DEPLOY_CODE" -ne 0 ]; then
+            echo '--- runtime.json ---'
+            cat .minit/runtime.json 2>/dev/null || true
+            echo '--- supervisor.log ---'
+            cat .minit/logs/supervisor.log 2>/dev/null || true
+            echo '--- app.log ---'
+            cat .minit/logs/app.log 2>/dev/null || true
+            exit "$DEPLOY_CODE"
+          fi
           python - <<'PY'
           import json, urllib.request
           data=json.load(urllib.request.urlopen('http://127.0.0.1:9341'))
@@ -106,7 +118,8 @@ jobs:
           New-Item -ItemType Directory -Force $app | Out-Null
           Set-Content "$root\private-secret.txt" "private-do-not-read"
           $userSid = ((whoami /user /fo csv /nh) | ConvertFrom-Csv -Header Name,Sid).Sid
-          icacls "$root\private-secret.txt" /inheritance:r /grant:r "*$userSid`:F" "*S-1-5-18:F" | Out-Null
+          icacls "$root\private-secret.txt" /grant:r "*$userSid`:F" "*S-1-5-18:F" | Out-Null
+          icacls "$root\private-secret.txt" /inheritance:r | Out-Null
           $code = @'
           import json, os
           from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -151,7 +164,16 @@ jobs:
           Set-Content "$app\probe.py" $code -Encoding UTF8
           Set-Location $app
           minit deploy --port 9341 -- python probe.py
-          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+          $deployCode = $LASTEXITCODE
+          if ($deployCode -ne 0) {
+            Write-Host '--- current user ---'; whoami /user
+            Write-Host '--- .minit ACL ---'; if (Test-Path '.minit') { icacls '.minit' }
+            Write-Host '--- service ACL ---'; if (Test-Path '.minit\service.json') { icacls '.minit\service.json' }
+            Write-Host '--- runtime.json ---'; if (Test-Path '.minit\runtime.json') { Get-Content '.minit\runtime.json' }
+            Write-Host '--- supervisor.log ---'; if (Test-Path '.minit\logs\supervisor.log') { Get-Content '.minit\logs\supervisor.log' }
+            Write-Host '--- app.log ---'; if (Test-Path '.minit\logs\app.log') { Get-Content '.minit\logs\app.log' }
+            throw "deploy failed with $deployCode"
+          }
           $json = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:9341').Content | ConvertFrom-Json
           $json | ConvertTo-Json
           if ($json.sibling_read -ne $false) { throw "sandbox read sibling private file" }
