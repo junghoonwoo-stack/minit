@@ -1,0 +1,242 @@
+name: Windows dogfood final
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-static:
+    name: "1 · Win2022 fresh install + detached lifecycle"
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fresh install from main
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-final-venv"
+          & "$env:RUNNER_TEMP\minit-final-venv\Scripts\python.exe" -m pip install --upgrade pip
+          & "$env:RUNNER_TEMP\minit-final-venv\Scripts\pip.exe" install "git+https://github.com/junghoonwoo-stack/minit.git@main"
+          & "$env:RUNNER_TEMP\minit-final-venv\Scripts\minit.exe" --help | Out-Null
+      - name: Deploy and verify shell-independent app
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-final-venv\Scripts\minit.exe"
+          $app = "$env:RUNNER_TEMP\Minit Final Dogfood\Alpha App"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content "$app\index.html" "fresh-detached-ok"
+          Set-Location $app
+          & $minit deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+          Start-Sleep -Seconds 2
+          $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000").Content
+          if ($body -notmatch "fresh-detached-ok") { throw "detached app not reachable" }
+          Set-Location $env:RUNNER_TEMP
+          & $minit status "Alpha App"
+          if ($LASTEXITCODE -ne 0) { throw "status failed from neutral directory" }
+          & $minit stop "Alpha App"
+          if ($LASTEXITCODE -ne 0) { throw "targeted stop failed" }
+          $closed = $false
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 250
+            try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000" -TimeoutSec 1 | Out-Null } catch { $closed = $true; break }
+          }
+          if (-not $closed) { throw "port remained reachable after stop" }
+
+  multiapp:
+    name: "2 · Win2025 three apps + targeted lifecycle"
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-final-multi"
+          & "$env:RUNNER_TEMP\minit-final-multi\Scripts\pip.exe" install .
+      - name: Deploy three apps and manage one independently
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-final-multi\Scripts\minit.exe"
+          $root = "$env:RUNNER_TEMP\final-multiapps"
+          $names = @("alpha", "beta", "gamma")
+          foreach ($name in $names) {
+            $dir = Join-Path $root $name
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Set-Content (Join-Path $dir "index.html") "final-$name"
+            Push-Location $dir
+            & $minit deploy
+            if ($LASTEXITCODE -ne 0) { throw "deploy failed for $name" }
+            Pop-Location
+          }
+          $ports = @()
+          foreach ($name in $names) {
+            $spec = Get-Content (Join-Path $root "$name\.minit\service.json") | ConvertFrom-Json
+            $ports += [int]$spec.port
+          }
+          if (($ports -join ',') -ne '8000,8001,8002') { throw "unexpected ports: $($ports -join ',')" }
+          Set-Location $env:RUNNER_TEMP
+          & $minit ls
+          & $minit stop beta
+          if ($LASTEXITCODE -ne 0) { throw "beta stop failed" }
+          $closed = $false
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 250
+            try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8001" -TimeoutSec 1 | Out-Null } catch { $closed = $true; break }
+          }
+          if (-not $closed) { throw "beta remained reachable after stop" }
+          if ((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000").Content -notmatch "final-alpha") { throw "alpha was disturbed" }
+          if ((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8002").Content -notmatch "final-gamma") { throw "gamma was disturbed" }
+          & $minit restart beta
+          if ($LASTEXITCODE -ne 0) { throw "beta restart failed" }
+          Start-Sleep -Seconds 2
+          if ((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8001").Content -notmatch "final-beta") { throw "beta failed restart" }
+          & $minit stop alpha
+          & $minit stop beta
+          & $minit stop gamma
+
+  crash-recovery:
+    name: "3 · Win2022 crash recovery + forced child kill"
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-final-crash"
+          & "$env:RUNNER_TEMP\minit-final-crash\Scripts\pip.exe" install .
+      - name: Crash once, recover, kill child, recover again
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-final-crash\Scripts\minit.exe"
+          $app = "$env:RUNNER_TEMP\A long Minit path with spaces\Crash Recovery App"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          $lines = @(
+            'from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer',
+            'from pathlib import Path',
+            'import sys, time',
+            'marker = Path("crashed-once.marker")',
+            'if not marker.exists():',
+            '    marker.write_text("1")',
+            '    time.sleep(0.4)',
+            '    sys.exit(7)',
+            'class H(BaseHTTPRequestHandler):',
+            '    def do_GET(self):',
+            '        body = b"crash-recovery-ok"',
+            '        self.send_response(200)',
+            '        self.send_header("Content-Type", "text/plain; charset=utf-8")',
+            '        self.send_header("Content-Length", str(len(body)))',
+            '        self.end_headers()',
+            '        self.wfile.write(body)',
+            '    def log_message(self, *args): pass',
+            'ThreadingHTTPServer(("127.0.0.1", 9123), H).serve_forever()'
+          )
+          Set-Content "$app\server.py" -Value $lines -Encoding UTF8
+          Set-Location $app
+          & $minit deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+          $runtime = Get-Content ".minit\runtime.json" | ConvertFrom-Json
+          if ([int]$runtime.restart_count -lt 1) { throw "initial crash was not recovered" }
+          $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:9123").Content
+          if ($body -notmatch "crash-recovery-ok") { throw "recovered app returned unexpected content: $body" }
+          $oldPid = [int]$runtime.app_pid
+          $oldRestarts = [int]$runtime.restart_count
+          Stop-Process -Id $oldPid -Force
+          $recovered = $false
+          for ($i=0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 400
+            $runtime = Get-Content ".minit\runtime.json" | ConvertFrom-Json
+            if ($runtime.app_pid -and [int]$runtime.app_pid -ne $oldPid -and [int]$runtime.restart_count -gt $oldRestarts) {
+              try {
+                $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:9123" -TimeoutSec 1).Content
+                if ($body -match "crash-recovery-ok") { $recovered = $true; break }
+              } catch {}
+            }
+          }
+          if (-not $recovered) {
+            Write-Host "runtime:"; Get-Content ".minit\runtime.json"
+            Write-Host "app log:"; if (Test-Path ".minit\logs\app.log") { Get-Content ".minit\logs\app.log" }
+            throw "supervisor did not recover after forced child kill"
+          }
+          Set-Location $env:RUNNER_TEMP
+          & $minit stop "Crash Recovery App"
+          if ($LASTEXITCODE -ne 0) { throw "crash app stop failed" }
+
+  security-autostart:
+    name: "4 · Win2025 Credential Manager + Task Scheduler"
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and deploy
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-final-security"
+          & "$env:RUNNER_TEMP\minit-final-security\Scripts\pip.exe" install .
+          $app = "$env:RUNNER_TEMP\final-security-app"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content "$app\index.html" "security-autostart-ok"
+          Set-Location $app
+          & "$env:RUNNER_TEMP\minit-final-security\Scripts\minit.exe" deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+      - name: Verify Credential Manager across processes
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\final-security-app"
+          $minit = "$env:RUNNER_TEMP\minit-final-security\Scripts\minit.exe"
+          $python = "$env:RUNNER_TEMP\minit-final-security\Scripts\python.exe"
+          Set-Location $app
+          & $minit security doctor
+          if ($LASTEXITCODE -ne 0) { throw "security doctor failed" }
+          & $minit security init
+          if ($LASTEXITCODE -ne 0) { throw "security init failed" }
+          & $python -c "from minit.secrets import set_secret; from pathlib import Path; set_secret('DOGFOOD_TOKEN','simulated-only-value',Path(r'$app'))"
+          if ($LASTEXITCODE -ne 0) { throw "secret write failed" }
+          & $python -c "from minit.secrets import get_secret; from pathlib import Path; assert get_secret('DOGFOOD_TOKEN',Path(r'$app')) == 'simulated-only-value'"
+          if ($LASTEXITCODE -ne 0) { throw "secret did not persist across process boundary" }
+      - name: Register and execute actual scheduled task
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\final-security-app"
+          $minit = "$env:RUNNER_TEMP\minit-final-security\Scripts\minit.exe"
+          Set-Location $app
+          & $minit autostart install
+          if ($LASTEXITCODE -ne 0) { throw "autostart install failed" }
+          $manifest = Get-Content ".minit\app.json" | ConvertFrom-Json
+          $taskName = "Minit-" + ($manifest.id.ToLower().Replace('-',''))
+          schtasks /Query /TN $taskName /V /FO LIST | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "scheduled task missing" }
+          & $minit stop
+          if ($LASTEXITCODE -ne 0) { throw "stop before task run failed" }
+          schtasks /Run /TN $taskName | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "scheduled task could not be run" }
+          $ok = $false
+          for ($i=0; $i -lt 30; $i++) {
+            Start-Sleep -Milliseconds 400
+            try {
+              $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000" -TimeoutSec 1).Content
+              if ($body -match "security-autostart-ok") { $ok = $true; break }
+            } catch {}
+          }
+          if (-not $ok) { throw "scheduled task did not restore app" }
+          & $minit autostart remove
+          if ($LASTEXITCODE -ne 0) { throw "autostart remove failed" }
+          schtasks /Query /TN $taskName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "task remained after removal" }
+          & $minit stop
