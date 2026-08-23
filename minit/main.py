@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -79,6 +80,13 @@ def _project_for_target(target: str | None) -> Path:
         raise typer.Exit(1) from exc
 
 
+def _register_best_effort(root: Path) -> None:
+    try:
+        register_project(root)
+    except (RegistryError, OSError) as exc:
+        console.print(f"[yellow]App is local, but global registration failed:[/yellow] {exc}")
+
+
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def deploy(
     ctx: typer.Context,
@@ -97,6 +105,7 @@ def deploy(
 
     This command does not upload the app or create a permanent public endpoint.
     """
+    root = Path.cwd().resolve()
     command = list(ctx.args)
     detected_kind: str | None = None
     detected_source: str | None = None
@@ -108,7 +117,7 @@ def deploy(
 
     if not command:
         try:
-            plan = detect_deploy_plan(Path.cwd(), requested_port=port)
+            plan = detect_deploy_plan(root, requested_port=port)
         except DetectionError as exc:
             console.print(f"[red]Could not auto-detect this app:[/red] {exc}")
             raise typer.Exit(2) from exc
@@ -116,8 +125,25 @@ def deploy(
         port = plan.port
         detected_kind = plan.kind
         detected_source = plan.source
+
+        # Re-running the normal one-command workflow should be safe and boring.
+        # If this exact project is already supervised by Minit, deploy is
+        # idempotent rather than treating Minit's own listening port as a
+        # conflicting process.
+        if plan.kind == "existing" and runtime_is_running(root):
+            spec = load_service_spec(root)
+            state = load_runtime_state(root) or {}
+            if spec is None:
+                console.print("[red]Local runtime exists but its service configuration is missing.[/red]")
+                raise typer.Exit(1)
+            _register_best_effort(root)
+            console.print(f"[green]✓ Already running:[/green] {spec['app_id']}")
+            console.print(f"[green]✓ Port:[/green]            127.0.0.1:{spec['port']}")
+            console.print(f"[green]✓ Status:[/green]          {state.get('status', 'running')}")
+            console.print("[dim]No redeploy was needed. Use `minit restart` if you want to restart the local service.[/dim]")
+            return
     elif port is None:
-        port = infer_port_from_command(command, Path.cwd())
+        port = infer_port_from_command(command, root)
         if port is None:
             console.print("[red]Could not infer the app's HTTP port from the command.[/red]")
             console.print("Use: [bold]minit deploy --port <port> -- <command>[/bold]")
@@ -130,17 +156,14 @@ def deploy(
         raise typer.Exit(1)
 
     try:
-        spec = configure_local_service(command, port, restart_policy=restart_policy)
-        harden_private_tree(Path.cwd() / MINIT_DIR)
-        state = start_local_service()
+        spec = configure_local_service(command, port, root, restart_policy=restart_policy)
+        harden_private_tree(root / MINIT_DIR)
+        state = start_local_service(root)
     except (RuntimeError, ValueError) as exc:
         console.print(f"[red]Could not deploy local service:[/red] {exc}")
         raise typer.Exit(1) from exc
 
-    try:
-        register_project(Path.cwd())
-    except (RegistryError, OSError) as exc:
-        console.print(f"[yellow]App is running, but global registration failed:[/yellow] {exc}")
+    _register_best_effort(root)
 
     if detected_kind is not None:
         console.print(f"[green]✓ Detected:[/green]      {detected_kind} from {detected_source}")
@@ -154,7 +177,7 @@ def deploy(
     console.print("[bold]The app now runs from this computer without this terminal.[/bold]")
     console.print("[dim]No code or app data was uploaded by this command.[/dim]")
     console.print("[dim]Use `minit ls` from anywhere to see locally registered Minit apps.[/dim]")
-    console.print("[dim]Use `minit status`, `minit logs`, `minit restart`, or `minit stop` to manage it.[/dim]")
+    console.print("[dim]Use `minit open`, `minit status`, `minit logs`, `minit restart`, or `minit stop` to manage it.[/dim]")
     console.print("[dim]Use `minit autostart install` if this app should return after login/reboot.[/dim]")
     console.print("[dim]Use `minit run --port <port>` separately for temporary public sharing.[/dim]")
 
@@ -203,6 +226,25 @@ def list_apps():
         )
     console.print(table)
     console.print("[dim]Registry is local-only and stores locators/operational metadata, not app data, secrets, or logs.[/dim]")
+
+
+@app.command(name="open")
+def open_app(target: str | None = typer.Argument(None, help="Optional app name or ID from `minit ls`.")):
+    """Open a running Minit app in the local default browser."""
+    root = _project_for_target(target)
+    spec = load_service_spec(root)
+    if spec is None:
+        console.print("[yellow]No local service is configured for this project.[/yellow]")
+        raise typer.Exit(1)
+    port = int(spec["port"])
+    if not runtime_is_running(root) or not _port_open(port):
+        console.print(f"[yellow]App is not currently reachable on 127.0.0.1:{port}.[/yellow]")
+        console.print("Use [bold]minit deploy[/bold] or [bold]minit restart[/bold] first.")
+        raise typer.Exit(1)
+    url = f"http://127.0.0.1:{port}"
+    webbrowser.open(url)
+    console.print(f"[green]✓ Opened local app:[/green] {url}")
+    console.print("[dim]This opens the local address only; no public sharing was enabled.[/dim]")
 
 
 @app.command()
