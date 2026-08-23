@@ -8,24 +8,50 @@ Minit is evolving from temporary local publishing into local-first application m
 
 The application process, code, mutable data, secrets, and encryption keys remain on machines controlled by the user.
 
-## Persistent local service
+## One-command persistent local deployment
+
+For common web projects, start with:
+
+```bash
+minit deploy
+```
+
+Minit performs conservative local detection and currently recognizes common patterns including static `index.html`, FastAPI, Flask, Streamlit, Vite, Next.js, and an existing `.minit/service.json` configuration.
+
+Detection is intentionally fail-closed. If Minit cannot safely determine both the application command and listening port, it does not guess. Configure the service explicitly once:
 
 ```bash
 minit deploy --port 8000 -- python app.py
 ```
 
+The resulting configuration is then reusable by later `minit deploy` calls.
+
 `minit deploy` does **not** upload the app. It starts a detached local supervisor and waits for the configured local HTTP port to become healthy.
 
-Manage it with:
+## Global local app registry
+
+A successful deployment registers a small local locator under the user's Minit home directory so many apps can be managed without first changing into each project directory.
 
 ```bash
-minit status
-minit logs
-minit restart
-minit stop
+minit ls
 ```
 
-The supervisor can restart a failed app and records local CPU/memory/process information. Runtime state and logs stay under `.minit/`.
+Then, from another directory:
+
+```bash
+minit status my-app
+minit logs my-app
+minit restart my-app
+minit stop my-app
+```
+
+Targets may be an app name, exact app ID, or an unambiguous app-ID prefix.
+
+The registry is local-only and deliberately narrow. It stores app ID, app name, project directory, port, and registration timestamps. It does not copy application data, commands, secret values, encrypted secret envelopes, or raw logs into the registry or into Minit cloud.
+
+A missing registered project is reported rather than silently removed because the project may be on a temporarily unavailable drive.
+
+The supervisor can restart a failed app and records local CPU/memory/process information. Runtime state and logs remain under each project's `.minit/` directory; the project remains the source of truth.
 
 ## Minimal environment and local secrets
 
@@ -93,7 +119,7 @@ minit autostart status
 minit autostart remove
 ```
 
-Adapters exist for macOS LaunchAgent, Linux systemd user services, and Windows Task Scheduler. Real-device login/reboot validation remains pending.
+Adapters exist for macOS LaunchAgent, Linux systemd user services, and Windows Task Scheduler. Cross-platform unit/package CI passes on macOS, Windows, and Linux, but real-device login/reboot behavior and OS key-store availability in actual user sessions still require dogfooding before release claims are strengthened.
 
 ## Cloud administration without cloud ownership
 
@@ -158,12 +184,20 @@ The cloud agent itself still needs user-level autostart and real-device OS key-s
 
 See `docs/CLOUD_ADMIN_PRIVACY.md` and `cloud_service/README.md`.
 
+## Validation to date
+
+The local-manager development branch has been tested through repository CI on Ubuntu, Windows, and macOS, plus wheel build/install smoke testing.
+
+Live dogfooding on clean hosted Linux machines has exercised multiple applications through `minit deploy`, local HTTP health, concurrent `minit run`, and external GET/POST requests. That exercise found a concurrent first-run `cloudflared` installation race; the installer is now serialized across local Minit processes and a regression test covers the behavior.
+
+This CI and hosted dogfood are useful but are not substitutes for actual desktop login/reboot/key-store behavior. A real Windows/macOS/desktop-Linux dogfood period is the next reliability milestone.
+
 ## Current focus
 
 Near-term development is focused on making the local runtime private, simple, and reliable:
 
-1. sandbox / filesystem and network boundaries
-2. real-device autostart + OS key-store validation for both app supervisor and cloud agent
+1. real-device multi-app dogfood: installation, terminal close, login/reboot, crash/restart, key-store and autostart behavior
+2. sandbox / filesystem and network boundaries
 3. backup retention/freshness and additional explicit data paths
 4. privacy-safe fleet/admin views and alerts
 5. authenticated end-to-end remote administration where the server cannot fabricate privileged commands
