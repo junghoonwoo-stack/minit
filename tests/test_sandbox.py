@@ -11,7 +11,7 @@ def test_windows_app_sid_is_stable_and_app_specific():
     b = windows_app_sid("22222222-2222-2222-2222-222222222222")
     assert a1 == a2
     assert a1 != b
-    assert a1.startswith("S-1-5-21-")
+    assert a1.startswith("S-1-15-2-")
 
 
 def test_legacy_service_is_explicitly_unsandboxed(tmp_path: Path):
