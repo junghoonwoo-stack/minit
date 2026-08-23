@@ -34,12 +34,15 @@
 
     <section class="terminal-wrap" aria-label="Minit local deployment example">
       <div class="terminal-head"><span></span><span></span><span></span><b>terminal · development main</b></div>
-      <pre><code><span class="dim">$</span> minit deploy --port 8000 -- python app.py
+      <pre><code><span class="dim">$</span> cd my-app
+<span class="dim">$</span> minit deploy
 
-<span class="ok">✓</span> Local service:  app-7f3a…
-<span class="ok">✓</span> Port:           127.0.0.1:8000
+<span class="ok">✓</span> Detected:       web app
 <span class="ok">✓</span> Status:         running
 <span class="ok">✓</span> Compute:        this PC
+
+<span class="dim">$</span> minit ls
+<span class="bright">my-app   running   healthy   8000</span>
 
 <span class="bright">The app keeps running after this terminal closes.</span>
 <span class="dim">No application code or data was uploaded.</span></code></pre>
@@ -69,29 +72,46 @@
     <section class="try" id="install">
       <div>
         <p class="eyebrow">INSTALL</p>
-        <h2>Stable sharing today. Local deployment on development main.</h2>
-        <p>PyPI <code>0.1.0</code> provides <code>minit run</code>, the temporary local sharing flow. Persistent <code>minit deploy</code> and the local manager are currently on <code>main / 0.2.0.dev0</code>.</p>
+        <h2>Stable sharing today. One-command local deployment on development main.</h2>
+        <p>PyPI <code>0.1.0</code> provides <code>minit run</code>. The one-command local manager is currently on <code>main / 0.2.0.dev0</code> and can be dogfooded directly from GitHub before an alpha release.</p>
       </div>
       <pre><code><span class="comment"># stable PyPI release</span>
 pipx install minit-runtime
 
-<span class="comment"># current local-manager development version</span>
-git clone https://github.com/junghoonwoo-stack/minit.git
-cd minit
-pip install -e .</code></pre>
+<span class="comment"># current development main</span>
+pipx install --force "git+https://github.com/junghoonwoo-stack/minit.git@main"
+
+<span class="comment"># inside a common web project</span>
+minit deploy
+minit ls</code></pre>
     </section>
 
     <section class="try" id="modes">
       <div>
-        <p class="eyebrow">TWO MODES</p>
-        <h2>Persistent when useful. Temporary when sharing.</h2>
-        <p><code>minit deploy</code> means “keep this app running on this computer.” <code>minit run</code> means “temporarily make this already-running local app reachable through a public URL.” Neither moves the application compute to Minit cloud.</p>
+        <p class="eyebrow">LOCAL MANAGEMENT</p>
+        <h2>One command to deploy. One view for your local apps.</h2>
+        <p>Minit safely detects common static, Python, and Node web-app patterns. If detection is ambiguous, it fails closed and asks for an explicit command. A local registry lets you manage deployed apps from another directory.</p>
       </div>
-      <pre><code><span class="comment"># development main: persistent local service</span>
+      <pre><code><span class="comment"># common path</span>
+minit deploy
+
+<span class="comment"># explicit fallback</span>
 minit deploy --port 8000 -- python app.py
 
-<span class="comment"># stable 0.1.0: temporary sharing</span>
-minit run --port 8000</code></pre>
+<span class="comment"># from anywhere on this computer</span>
+minit ls
+minit status my-app
+minit restart my-app
+minit logs my-app</code></pre>
+    </section>
+
+    <section class="try">
+      <div>
+        <p class="eyebrow">TEMPORARY SHARING</p>
+        <h2>Sharing is separate from deployment.</h2>
+        <p><code>minit deploy</code> means “keep this app running on this computer.” <code>minit run</code> means “temporarily make this already-running local app reachable through a public URL.” Current Quick Tunnel sharing is not the target private E2E architecture.</p>
+      </div>
+      <pre><code>minit run --port 8000</code></pre>
     </section>
 
     <section class="security">
