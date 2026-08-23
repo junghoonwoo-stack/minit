@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import typer
+from rich.table import Table
 
 from minit.app_keys import get_or_create_app_key
 from minit.autostart import AutostartUnavailable, autostart_info, disable_autostart, enable_autostart
 from minit.cli import _port_open, app, console
+from minit.detection import DetectionError, detect_deploy_plan, infer_port_from_command
 from minit.key_store import SecureKeyStoreUnavailable, system_key_store_status
 from minit.management import local_app_status
 from minit.private_fs import harden_private_tree
+from minit.registry import RegistryError, list_registered_apps, register_project, resolve_registered_project
 from minit.runtime import (
     load_runtime_state,
     restart_local_service,
@@ -64,10 +69,20 @@ def _format_time(value: str | None) -> str:
         return value
 
 
+def _project_for_target(target: str | None) -> Path:
+    if target is None:
+        return Path.cwd().resolve()
+    try:
+        return resolve_registered_project(target)
+    except RegistryError as exc:
+        console.print(f"[red]Could not resolve app:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def deploy(
     ctx: typer.Context,
-    port: int = typer.Option(..., "--port", "-p", help="Local HTTP port the managed app will listen on."),
+    port: int | None = typer.Option(None, "--port", "-p", help="Local HTTP port. Auto-detected when omitted."),
     restart_policy: str = typer.Option(
         "on-failure",
         "--restart",
@@ -76,22 +91,39 @@ def deploy(
 ):
     """Keep an app running on this computer after the terminal closes.
 
-    Pass the app command after `--`, for example:
+    With no arguments Minit safely detects common local web app types. You can
+    always override detection, for example:
     `minit deploy --port 8000 -- python app.py`
 
     This command does not upload the app or create a permanent public endpoint.
     """
     command = list(ctx.args)
-    if not command:
-        console.print("[red]No app command provided.[/red]")
-        console.print("Example: [bold]minit deploy --port 8000 -- python app.py[/bold]")
-        raise typer.Exit(2)
+    detected_kind: str | None = None
+    detected_source: str | None = None
 
     if restart_policy not in RESTART_POLICIES:
         console.print(f"[red]Unknown restart policy:[/red] {restart_policy}")
         console.print("Choose: never, on-failure, always")
         raise typer.Exit(2)
 
+    if not command:
+        try:
+            plan = detect_deploy_plan(Path.cwd(), requested_port=port)
+        except DetectionError as exc:
+            console.print(f"[red]Could not auto-detect this app:[/red] {exc}")
+            raise typer.Exit(2) from exc
+        command = plan.command
+        port = plan.port
+        detected_kind = plan.kind
+        detected_source = plan.source
+    elif port is None:
+        port = infer_port_from_command(command, Path.cwd())
+        if port is None:
+            console.print("[red]Could not infer the app's HTTP port from the command.[/red]")
+            console.print("Use: [bold]minit deploy --port <port> -- <command>[/bold]")
+            raise typer.Exit(2)
+
+    assert port is not None
     if _port_open(port):
         console.print(f"[red]Port 127.0.0.1:{port} is already in use.[/red]")
         console.print("Stop the existing local process before handing this app to Minit.")
@@ -99,12 +131,19 @@ def deploy(
 
     try:
         spec = configure_local_service(command, port, restart_policy=restart_policy)
-        harden_private_tree(spec_path_parent := __import__("pathlib").Path.cwd() / MINIT_DIR)
+        harden_private_tree(Path.cwd() / MINIT_DIR)
         state = start_local_service()
     except (RuntimeError, ValueError) as exc:
         console.print(f"[red]Could not deploy local service:[/red] {exc}")
         raise typer.Exit(1) from exc
 
+    try:
+        register_project(Path.cwd())
+    except (RegistryError, OSError) as exc:
+        console.print(f"[yellow]App is running, but global registration failed:[/yellow] {exc}")
+
+    if detected_kind is not None:
+        console.print(f"[green]✓ Detected:[/green]      {detected_kind} from {detected_source}")
     console.print(f"[green]✓ Local service:[/green] {spec['app_id']}")
     console.print(f"[green]✓ Command:[/green]       {' '.join(spec['command'])}")
     console.print(f"[green]✓ Port:[/green]          127.0.0.1:{spec['port']}")
@@ -114,33 +153,80 @@ def deploy(
     console.print()
     console.print("[bold]The app now runs from this computer without this terminal.[/bold]")
     console.print("[dim]No code or app data was uploaded by this command.[/dim]")
-    console.print("[dim]Arbitrary shell environment variables are not inherited by the managed app.[/dim]")
-    console.print("[dim]Use `minit secret set NAME` to add an app secret from the local encrypted store.[/dim]")
+    console.print("[dim]Use `minit ls` from anywhere to see locally registered Minit apps.[/dim]")
     console.print("[dim]Use `minit status`, `minit logs`, `minit restart`, or `minit stop` to manage it.[/dim]")
     console.print("[dim]Use `minit autostart install` if this app should return after login/reboot.[/dim]")
     console.print("[dim]Use `minit run --port <port>` separately for temporary public sharing.[/dim]")
 
 
+@app.command(name="ls")
+def list_apps():
+    """List Minit-managed apps registered on this computer."""
+    try:
+        entries = list_registered_apps()
+    except RegistryError as exc:
+        console.print(f"[red]Could not read local app registry:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    if not entries:
+        console.print("[dim]No globally registered Minit apps yet. Run `minit deploy` in a project.[/dim]")
+        return
+
+    table = Table(title="Minit apps on this computer")
+    table.add_column("App")
+    table.add_column("ID")
+    table.add_column("Status")
+    table.add_column("Health")
+    table.add_column("Port", justify="right")
+    table.add_column("Project")
+
+    for entry in entries:
+        root = Path(entry["project_dir"])
+        if not root.exists():
+            status_text = "missing"
+            health = "-"
+            port_text = str(entry.get("port", "-"))
+        else:
+            running = runtime_is_running(root)
+            runtime = load_runtime_state(root)
+            status_text = str(runtime.get("status", "running")) if running and runtime else "stopped"
+            health = str(runtime.get("health", "unknown")) if running and runtime else "-"
+            spec = load_service_spec(root)
+            port_text = str(spec.get("port")) if spec else str(entry.get("port", "-"))
+        table.add_row(
+            str(entry.get("name", "-")),
+            str(entry.get("app_id", ""))[:8],
+            status_text,
+            health,
+            port_text,
+            str(root),
+        )
+    console.print(table)
+    console.print("[dim]Registry is local-only and stores locators/operational metadata, not app data, secrets, or logs.[/dim]")
+
+
 @app.command()
-def status():
+def status(target: str | None = typer.Argument(None, help="Optional app name or ID from `minit ls`.")):
     """Show locally recorded app and service status."""
-    current = local_app_status()
+    root = _project_for_target(target)
+    current = local_app_status(root)
     if current is None:
         console.print("[yellow]This project is not initialized yet.[/yellow]")
-        console.print("Run [bold]minit init[/bold], [bold]minit run[/bold], or [bold]minit deploy[/bold] first.")
+        console.print("Run [bold]minit deploy[/bold] here, or [bold]minit ls[/bold] to find another app.")
         raise typer.Exit(1)
 
     console.print(f"[bold]{current['name']}[/bold]")
     console.print(f"  app id:          {current['app_id']}")
+    console.print(f"  project:         {root}")
     console.print(f"  runtime:         {current['runtime']}")
     console.print(f"  successful runs: {current['successful_runs']}")
     console.print(f"  total live time: {_format_duration(current['total_live_seconds'])}")
     console.print(f"  last started:    {_format_time(current['last_started_at'])}")
     console.print(f"  last stopped:    {_format_time(current['last_stopped_at'])}")
-    console.print(f"  local secrets:   {len(list_secret_names())} encrypted")
+    console.print(f"  local secrets:   {len(list_secret_names(root))} encrypted")
 
-    spec = load_service_spec()
-    runtime = load_runtime_state()
+    spec = load_service_spec(root)
+    runtime = load_runtime_state(root)
     if spec is not None:
         console.print()
         console.print("[bold]Local service[/bold]")
@@ -152,7 +238,7 @@ def status():
         if runtime is None:
             console.print("  process:         configured, not started")
         else:
-            alive = runtime_is_running()
+            alive = runtime_is_running(root)
             process_status = runtime.get("status", "unknown") if alive else "stopped"
             console.print(f"  process:         {process_status}")
             console.print(f"  health:          {runtime.get('health', 'unknown')}")
@@ -171,13 +257,14 @@ def status():
 
 
 @app.command()
-def stop():
-    """Stop the Minit-managed local service."""
-    if load_service_spec() is None:
+def stop(target: str | None = typer.Argument(None, help="Optional app name or ID from `minit ls`.")):
+    """Stop a Minit-managed local service."""
+    root = _project_for_target(target)
+    if load_service_spec(root) is None:
         console.print("[yellow]No local service is configured for this project.[/yellow]")
         raise typer.Exit(1)
 
-    state = stop_local_service()
+    state = stop_local_service(root)
     if state is None:
         console.print("[yellow]No local service runtime state was found.[/yellow]")
         return
@@ -185,13 +272,14 @@ def stop():
 
 
 @app.command()
-def restart():
-    """Restart the Minit-managed local service."""
-    if load_service_spec() is None:
+def restart(target: str | None = typer.Argument(None, help="Optional app name or ID from `minit ls`.")):
+    """Restart a Minit-managed local service."""
+    root = _project_for_target(target)
+    if load_service_spec(root) is None:
         console.print("[yellow]No local service is configured for this project.[/yellow]")
         raise typer.Exit(1)
     try:
-        state = restart_local_service()
+        state = restart_local_service(root)
     except RuntimeError as exc:
         console.print(f"[red]Could not restart local service:[/red] {exc}")
         raise typer.Exit(1) from exc
@@ -200,10 +288,12 @@ def restart():
 
 @app.command(name="logs")
 def logs_command(
+    target: str | None = typer.Argument(None, help="Optional app name or ID from `minit ls`."),
     lines: int = typer.Option(50, "--lines", "-n", min=1, max=5000, help="Number of recent app log lines."),
 ):
     """Show recent logs stored on this computer."""
-    log_lines = tail_app_log(lines=lines)
+    root = _project_for_target(target)
+    log_lines = tail_app_log(root, lines=lines)
     if not log_lines:
         console.print("[yellow]No local app logs found yet.[/yellow]")
         return
@@ -216,7 +306,7 @@ def autostart_install():
     """Install a user-level login/boot entry for the configured local service."""
     try:
         info = enable_autostart()
-    except (AutostartUnavailable, OSError, __import__("subprocess").CalledProcessError) as exc:
+    except (AutostartUnavailable, OSError, subprocess.CalledProcessError) as exc:
         console.print(f"[red]Could not install autostart:[/red] {exc}")
         raise typer.Exit(1) from exc
     console.print(f"[green]✓ Autostart installed:[/green] {info.identifier}")
@@ -318,14 +408,12 @@ def security_init():
         raise typer.Exit(1) from exc
     console.print("[green]✓ Local key protection initialized.[/green]")
     console.print("[dim]The device root key stays in the operating-system key store.[/dim]")
-    console.print("[yellow]Recovery is not implemented yet. Losing the local root key can make encrypted secrets unrecoverable.[/yellow]")
+    console.print("[dim]For machine-loss recovery, create a user-held key with `minit recovery create` and store it off-device.[/dim]")
 
 
 @security_app.command("harden")
 def security_harden():
     """Re-apply owner-only permissions to existing local Minit state."""
-    from pathlib import Path
-
     root = Path.cwd() / MINIT_DIR
     harden_private_tree(root)
     console.print(f"[green]✓ Hardened local Minit state:[/green] {root}")
