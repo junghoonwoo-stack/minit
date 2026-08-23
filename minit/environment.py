@@ -73,11 +73,29 @@ def app_environment(
     data_dir.mkdir(parents=True, exist_ok=True)
 
     env = minimal_environment(source)
+    if spec.get("sandbox_policy") == "strict":
+        sandbox_home = data_dir / "home"
+        sandbox_tmp = data_dir / "tmp"
+        sandbox_home.mkdir(parents=True, exist_ok=True)
+        sandbox_tmp.mkdir(parents=True, exist_ok=True)
+        env.update(
+            {
+                "HOME": str(sandbox_home),
+                "USERPROFILE": str(sandbox_home),
+                "TEMP": str(sandbox_tmp),
+                "TMP": str(sandbox_tmp),
+                "TMPDIR": str(sandbox_tmp),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+
     env.update(
         {
             "MINIT_APP_ID": str(spec["app_id"]),
             "MINIT_RUNTIME": "local",
             "MINIT_DATA_DIR": str(data_dir),
+            "MINIT_SANDBOX": str(spec.get("sandbox_policy", "legacy-unsandboxed")),
+            "MINIT_NETWORK_POLICY": str(spec.get("network_policy", "shared")),
         }
     )
     env.update(get_all_secrets(root, store=store))
