@@ -9,6 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from minit.private_fs import _windows_user_sid
 from minit.state import MINIT_DIR
 
 
@@ -66,45 +67,28 @@ def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     sandbox_home = _sandbox_home(root)
     sandbox_tmp = _sandbox_temp(root)
 
-    # Stage the project and mutable data under /run before masking the user's
-    # home directory. This prevents app access to sibling files in HOME while
-    # preserving a read-only view of its own project and a writable data area.
-    staged_project = "/run/minit-project"
-    staged_data = "/run/minit-data"
-
     args = [
         bwrap,
         "--die-with-parent",
         "--new-session",
+        "--ro-bind", "/", "/",
         "--proc", "/proc",
         "--dev", "/dev",
-        "--ro-bind", "/", "/",
-        "--dir", "/run",
-        "--ro-bind", str(root), staged_project,
-        "--bind", str(data), staged_data,
     ]
 
+    # Bubblewrap opens bind sources from the parent namespace, so the user's
+    # home can be masked before selected project/data paths are remounted.
     if _path_within(root, home):
         args += ["--tmpfs", str(home)]
-        current = home
-        relative_parts = root.relative_to(home).parts
-        for part in relative_parts:
-            current = current / part
-            args += ["--dir", str(current)]
-        args += ["--ro-bind", staged_project, str(root)]
-    else:
-        args += ["--ro-bind", staged_project, str(root)]
+    args += ["--ro-bind", str(root), str(root)]
 
-    # Hide all Minit control/key material from the app, then selectively expose
-    # only the declared mutable-data directory.
+    # The project bind contains .minit, so mask it and re-expose only mutable
+    # app data. The manager's keys/config/logs stay outside the app namespace.
     minit_dir = root / MINIT_DIR
     args += [
         "--tmpfs", str(minit_dir),
-        "--dir", str(data),
-        "--bind", staged_data, str(data),
+        "--bind", str(data), str(data),
         "--tmpfs", "/tmp",
-        "--dir", str(sandbox_home),
-        "--dir", str(sandbox_tmp),
         "--chdir", str(root),
         "--setenv", "HOME", str(sandbox_home),
         "--setenv", "TMPDIR", str(sandbox_tmp),
@@ -116,13 +100,23 @@ def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     return SandboxPlan(
         command=args,
         backend="bubblewrap",
-        filesystem_policy="project-readonly-data-readwrite-home-hidden",
+        filesystem_policy="project-readonly-data-readwrite-home-hidden-minit-hidden",
         network_policy="shared",
     )
 
 
 def _sbpl_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _macos_project_read_rules(root: Path) -> list[str]:
+    rules: list[str] = []
+    for child in root.iterdir():
+        if child.name == MINIT_DIR:
+            continue
+        kind = "subpath" if child.is_dir() else "literal"
+        rules.append(f'  ({kind} "{_sbpl_escape(str(child.resolve()))}")')
+    return rules
 
 
 def _macos_profile(project_dir: Path) -> str:
@@ -137,15 +131,16 @@ def _macos_profile(project_dir: Path) -> str:
         "/bin",
         "/sbin",
         "/Library",
+        "/dev",
         "/private/etc",
         "/private/var/db",
-        str(root),
         str(Path(sys.executable).resolve().parent),
         str(Path(sys.prefix).resolve()),
     }
-    read_rules = "\n".join(
-        f'  (subpath "{_sbpl_escape(path)}")' for path in sorted(readable)
-    )
+    read_rules = [f'  (subpath "{_sbpl_escape(path)}")' for path in sorted(readable)]
+    read_rules.extend(_macos_project_read_rules(root))
+    read_rules.append(f'  (subpath "{_sbpl_escape(str(data))}")')
+    rendered_reads = "\n".join(read_rules)
     return f'''(version 1)
 (deny default)
 (allow process*)
@@ -156,7 +151,7 @@ def _macos_profile(project_dir: Path) -> str:
 (allow network*)
 (allow file-read-metadata)
 (allow file-read*
-{read_rules})
+{rendered_reads})
 (allow file-write*
   (subpath "{_sbpl_escape(str(data))}")
   (subpath "{_sbpl_escape(str(sandbox_home))}")
@@ -175,7 +170,7 @@ def _macos_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     return SandboxPlan(
         command=[sandbox_exec, "-p", profile, *command],
         backend="sandbox-exec",
-        filesystem_policy="project-readonly-data-readwrite-home-hidden",
+        filesystem_policy="project-readonly-data-readwrite-home-hidden-minit-hidden",
         network_policy="shared",
     )
 
@@ -205,15 +200,35 @@ def prepare_windows_sandbox_acl(project_dir: Path, app_id: str) -> str:
     data.mkdir(parents=True, exist_ok=True)
     sid = windows_app_sid(app_id)
     sid_arg = f"*{sid}"
+    user_sid = f"*{_windows_user_sid()}"
+    system_sid = "*S-1-5-18"
 
-    # Project: read/execute. Minit control state: traverse the directory only,
-    # with no inherited access to keys/config/logs. Mutable data: modify.
-    _run_icacls([str(root), "/grant", f"{sid_arg}:(OI)(CI)(RX)", "/T", "/C"])
+    # Break broad parent inheritance so BUILTIN\Users cannot accidentally give
+    # the restricted process write access. Keep the human owner and SYSTEM in
+    # full control, while the app-specific restricting SID receives RX only.
+    _run_icacls([str(root), "/inheritance:r", "/T", "/C"])
+    _run_icacls(
+        [
+            str(root),
+            "/grant:r",
+            f"{user_sid}:(OI)(CI)F",
+            f"{system_sid}:(OI)(CI)F",
+            f"{sid_arg}:(OI)(CI)RX",
+            "/T",
+            "/C",
+        ]
+    )
+    for broad_sid in ("*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"):
+        _run_icacls([str(root), "/remove:g", broad_sid, "/T", "/C"])
+
+    # Hide Minit control/key material. The app may traverse .minit only to its
+    # dedicated data directory, which receives Modify rights.
     if minit_dir.exists():
-        _run_icacls([str(minit_dir), "/inheritance:d"])
+        _run_icacls([str(minit_dir), "/inheritance:r", "/T", "/C"])
         _run_icacls([str(minit_dir), "/remove", sid_arg, "/T", "/C"])
+        _run_icacls([str(minit_dir), "/grant", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F"])
         _run_icacls([str(minit_dir), "/grant", f"{sid_arg}:(RX)"])
-    _run_icacls([str(data), "/grant", f"{sid_arg}:(OI)(CI)(M)", "/T", "/C"])
+    _run_icacls([str(data), "/grant", f"{sid_arg}:(OI)(CI)M", "/T", "/C"])
     return sid
 
 
@@ -233,7 +248,7 @@ def _windows_plan(command: list[str], project_dir: Path, app_id: str) -> Sandbox
             *command,
         ],
         backend="windows-restricted-token",
-        filesystem_policy="restricted-token-project-readonly-data-readwrite",
+        filesystem_policy="restricted-token-project-readonly-data-readwrite-minit-hidden",
         network_policy="shared",
     )
 
