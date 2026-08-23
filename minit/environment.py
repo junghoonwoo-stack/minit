@@ -17,7 +17,9 @@ SAFE_BASE_ENV_KEYS = {
     "USER",
     "LOGNAME",
     "USERPROFILE",
-    "SystemRoot",
+    # Python normalizes Windows environment-variable keys to uppercase. Windows
+    # system components (including Winsock providers) can require SYSTEMROOT.
+    "SYSTEMROOT",
     "WINDIR",
     "COMSPEC",
     "PATHEXT",
