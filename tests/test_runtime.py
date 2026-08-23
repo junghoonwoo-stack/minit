@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from minit.runtime import (
+    _is_fresh_runtime_generation,
     app_log_path,
     load_runtime_state,
     runtime_state_path,
@@ -23,6 +24,32 @@ def test_runtime_state_is_project_local(tmp_path: Path):
 
     assert runtime_state_path(tmp_path) == tmp_path / ".minit" / "runtime.json"
     assert load_runtime_state(tmp_path) == state
+
+
+def test_fresh_runtime_generation_does_not_require_launcher_pid_identity():
+    state = {
+        "app_id": "app-1",
+        "supervisor_pid": 5678,
+        "started_at": "2026-08-23T11:20:05+00:00",
+        "status": "running",
+        "health": "healthy",
+    }
+
+    assert _is_fresh_runtime_generation(
+        state,
+        app_id="app-1",
+        previous_started_at="2026-08-23T11:19:00+00:00",
+    )
+    assert not _is_fresh_runtime_generation(
+        state,
+        app_id="app-1",
+        previous_started_at=state["started_at"],
+    )
+    assert not _is_fresh_runtime_generation(
+        state,
+        app_id="another-app",
+        previous_started_at=None,
+    )
 
 
 def test_app_logs_are_kept_under_local_minit_directory(tmp_path: Path):
