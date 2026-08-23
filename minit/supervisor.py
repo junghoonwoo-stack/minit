@@ -13,7 +13,7 @@ from typing import Any
 from minit.environment import app_environment
 from minit.monitoring import ProcessMonitor
 from minit.private_fs import ensure_private_dir, ensure_private_file
-from minit.runtime import app_log_path, clear_control, read_control, save_runtime_state
+from minit.runtime import app_log_path, clear_control, process_create_time, read_control, save_runtime_state
 from minit.service import load_service_spec
 
 HEALTH_INTERVAL_SECONDS = 2.0
@@ -74,7 +74,9 @@ def _base_state(spec: dict[str, Any], supervisor_pid: int) -> dict[str, Any]:
         "schema_version": 1,
         "app_id": spec["app_id"],
         "supervisor_pid": supervisor_pid,
+        "supervisor_create_time": process_create_time(supervisor_pid),
         "app_pid": None,
+        "app_create_time": None,
         "status": "starting",
         "health": "starting",
         "port": spec["port"],
@@ -136,6 +138,7 @@ def supervise(project_dir: Path) -> int:
         except Exception:
             monitor = None
         state["app_pid"] = process.pid
+        state["app_create_time"] = process_create_time(process.pid)
         state["status"] = "starting"
         state["health"] = "starting"
         state["metrics"] = {"available": monitor is not None}
@@ -157,6 +160,7 @@ def supervise(project_dir: Path) -> int:
                 if exit_code is not None:
                     state["last_exit_code"] = exit_code
                     state["app_pid"] = None
+                    state["app_create_time"] = None
                     state["metrics"] = {"available": False}
                     save_runtime_state(state, root)
 
@@ -206,6 +210,7 @@ def supervise(project_dir: Path) -> int:
         _terminate_process_tree(app_process)
         clear_control(root)
         state["app_pid"] = None
+        state["app_create_time"] = None
         state["metrics"] = {"available": False}
         if state.get("status") != "failed":
             state["status"] = "stopped"
