@@ -5,7 +5,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from minit.main import app
-from minit.registry import register_project
+from minit.registry import register_project, resolve_registered_project
 from minit.service import configure_local_service, load_service_spec
 from minit.state import create_manifest, record_publish_start, record_publish_stop
 
@@ -125,6 +125,8 @@ def test_ls_and_targeted_status_work_outside_project(tmp_path: Path, monkeypatch
     assert listed.exit_code == 0
     assert "alpha" in listed.stdout
     assert "8123" in listed.stdout
+    assert resolve_registered_project("alpha") == project.resolve()
     assert status.exit_code == 0
     assert "alpha" in status.stdout
-    assert str(project.resolve()) in status.stdout
+    assert "project:" in status.stdout
+    assert "status source:   local only" in status.stdout
