@@ -40,6 +40,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install strict sandbox prerequisite
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
       - name: Install current Minit
         run: python -m pip install -e .
 

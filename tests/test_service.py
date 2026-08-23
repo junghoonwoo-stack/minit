@@ -22,6 +22,8 @@ def test_service_spec_is_local_and_contains_no_secret_values(tmp_path: Path):
     assert spec["working_dir"] == str(tmp_path.resolve())
     assert spec["restart_policy"] == "on-failure"
     assert spec["environment_policy"] == "minimal"
+    assert spec["sandbox_policy"] == "strict"
+    assert spec["network_policy"] == "shared"
     assert spec["autostart"] is False
     assert "env" not in spec
     assert "secrets" not in spec

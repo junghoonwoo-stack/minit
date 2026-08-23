@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import secrets
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -55,17 +57,77 @@ def atomic_write_json(path: Path, payload: Any, *, sort_keys: bool = False) -> N
     atomic_write_text(path, text)
 
 
-def harden_private_tree(root: Path) -> None:
-    """Best-effort owner-only permissions for Minit-managed local state.
+def _windows_user_sid() -> str:
+    result = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"Could not determine Windows user SID: {result.stderr.strip()}")
+    row = next(csv.reader([result.stdout.strip()]), None)
+    if not row or len(row) < 2 or not row[1].startswith("S-"):
+        raise OSError("Could not parse Windows user SID.")
+    return row[1]
 
-    Windows ACLs are not modified here; Windows security remains delegated to
-    the user's profile/credential store until an explicit ACL implementation is
-    added and tested.
+
+def _run_icacls(args: list[str]) -> None:
+    result = subprocess.run(
+        ["icacls", *args],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"Windows ACL hardening failed: {result.stderr.strip() or 'icacls error'}")
+
+
+def _harden_windows_path(path: Path, *, is_dir: bool, user_sid: str, system_sid: str) -> None:
+    # Add explicit owner/SYSTEM rights *before* removing inherited ACEs. This
+    # prevents the hardening operation from briefly locking Minit out of its
+    # own state files on Windows.
+    suffix = "(OI)(CI)F" if is_dir else "F"
+    _run_icacls([str(path), "/grant:r", f"{user_sid}:{suffix}", f"{system_sid}:{suffix}"])
+    _run_icacls([str(path), "/inheritance:r"])
+    for broad_sid in ("*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"):
+        _run_icacls([str(path), "/remove:g", broad_sid])
+
+
+def _harden_windows_tree(root: Path) -> None:
+    user_sid = f"*{_windows_user_sid()}"
+    system_sid = "*S-1-5-18"
+    # Snapshot paths while the original ACLs are still intact, then harden each
+    # object individually. Avoid a recursive `inheritance:r` pass that can
+    # strip child access before the explicit owner grant reaches those files.
+    paths = [root, *root.rglob("*")]
+    paths.sort(key=lambda path: (len(path.parts), str(path).lower()))
+    for path in paths:
+        if not path.exists():
+            continue
+        _harden_windows_path(
+            path,
+            is_dir=path.is_dir(),
+            user_sid=user_sid,
+            system_sid=system_sid,
+        )
+
+
+def harden_private_tree(root: Path) -> None:
+    """Enforce private permissions for Minit-managed local state.
+
+    POSIX uses owner-only mode bits. Windows removes inherited/broad group
+    grants from the Minit tree and grants Full Control to the current user and
+    SYSTEM. Administrators can still exercise normal OS-level administrative
+    authority; this boundary is intended to protect against ordinary sibling
+    processes/users, not a compromised administrator/kernel.
     """
     if not root.exists():
         return
     ensure_private_dir(root)
     if os.name == "nt":
+        _harden_windows_tree(root)
         return
     for path in root.rglob("*"):
         try:
@@ -74,6 +136,6 @@ def harden_private_tree(root: Path) -> None:
             elif path.is_file():
                 path.chmod(PRIVATE_FILE_MODE)
         except OSError:
-            # Hardening is best-effort for existing trees; individual secure
-            # write helpers still enforce permissions for new Minit state.
+            # Existing trees may contain transient files. New Minit writes still
+            # go through owner-only atomic helpers.
             continue

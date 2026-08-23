@@ -1,0 +1,185 @@
+name: Strict sandbox E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox:
+    name: ${{ matrix.os }} strict sandbox
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bubblewrap on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Install Minit
+        run: python -m pip install -e .
+
+      - name: Create probe app on POSIX
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$HOME/minit-sandbox-e2e"
+          APP="$ROOT/app"
+          rm -rf "$ROOT"
+          mkdir -p "$APP"
+          echo 'private-do-not-read' > "$ROOT/private-secret.txt"
+          cat > "$APP/probe.py" <<'PY'
+          import json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          root = Path.cwd()
+          sibling = root.parent / "private-secret.txt"
+          result = {}
+          try:
+              sibling.read_text()
+              result["sibling_read"] = True
+          except Exception:
+              result["sibling_read"] = False
+          try:
+              (root / "should-not-write.txt").write_text("bad")
+              result["project_write"] = True
+          except Exception:
+              result["project_write"] = False
+          try:
+              (root / ".minit" / "service.json").read_text()
+              result["minit_read"] = True
+          except Exception:
+              result["minit_read"] = False
+          data = Path(os.environ["MINIT_DATA_DIR"])
+          (data / "probe.txt").write_text("data-ok")
+          result["data_write"] = (data / "probe.txt").read_text() == "data-ok"
+          result["sandbox"] = os.environ.get("MINIT_SANDBOX")
+          result["network"] = os.environ.get("MINIT_NETWORK_POLICY")
+
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  body = json.dumps(result).encode()
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def log_message(self, *args): pass
+
+          ThreadingHTTPServer(("127.0.0.1", 9341), H).serve_forever()
+          PY
+          cd "$APP"
+          set +e
+          minit deploy --port 9341 -- python probe.py
+          DEPLOY_CODE=$?
+          set -e
+          if [ "$DEPLOY_CODE" -ne 0 ]; then
+            echo '--- runtime.json ---'
+            cat .minit/runtime.json 2>/dev/null || true
+            echo '--- supervisor.log ---'
+            cat .minit/logs/supervisor.log 2>/dev/null || true
+            echo '--- app.log ---'
+            cat .minit/logs/app.log 2>/dev/null || true
+            exit "$DEPLOY_CODE"
+          fi
+          python - <<'PY'
+          import json, urllib.request
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:9341'))
+          print(data)
+          assert data['sibling_read'] is False
+          assert data['project_write'] is False
+          assert data['minit_read'] is False
+          assert data['data_write'] is True
+          assert data['sandbox'] == 'strict'
+          assert data['network'] == 'shared'
+          PY
+          minit stop
+
+      - name: Create probe app on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "$HOME\minit-sandbox-e2e"
+          $app = "$root\app"
+          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content "$root\private-secret.txt" "private-do-not-read"
+          $userSid = ((whoami /user /fo csv /nh) | ConvertFrom-Csv -Header Name,Sid).Sid
+          icacls "$root\private-secret.txt" /grant:r "*$userSid`:F" "*S-1-5-18:F" | Out-Null
+          icacls "$root\private-secret.txt" /inheritance:r | Out-Null
+          $code = @'
+          import json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          root = Path.cwd()
+          sibling = root.parent / "private-secret.txt"
+          result = {}
+          try:
+              sibling.read_text()
+              result["sibling_read"] = True
+          except Exception:
+              result["sibling_read"] = False
+          try:
+              (root / "should-not-write.txt").write_text("bad")
+              result["project_write"] = True
+          except Exception:
+              result["project_write"] = False
+          try:
+              (root / ".minit" / "service.json").read_text()
+              result["minit_read"] = True
+          except Exception:
+              result["minit_read"] = False
+          data = Path(os.environ["MINIT_DATA_DIR"])
+          (data / "probe.txt").write_text("data-ok")
+          result["data_write"] = (data / "probe.txt").read_text() == "data-ok"
+          result["sandbox"] = os.environ.get("MINIT_SANDBOX")
+          result["network"] = os.environ.get("MINIT_NETWORK_POLICY")
+
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  body = json.dumps(result).encode()
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def log_message(self, *args): pass
+
+          ThreadingHTTPServer(("127.0.0.1", 9341), H).serve_forever()
+          '@
+          Set-Content "$app\probe.py" $code -Encoding UTF8
+          Set-Location $app
+          minit deploy --port 9341 -- python probe.py
+          $deployCode = $LASTEXITCODE
+          if ($deployCode -ne 0) {
+            Write-Host '--- current user ---'; whoami /user
+            Write-Host '--- .minit ACL ---'; if (Test-Path '.minit') { icacls '.minit' }
+            Write-Host '--- service ACL ---'; if (Test-Path '.minit\service.json') { icacls '.minit\service.json' }
+            Write-Host '--- runtime.json ---'; if (Test-Path '.minit\runtime.json') { Get-Content '.minit\runtime.json' }
+            Write-Host '--- supervisor.log ---'; if (Test-Path '.minit\logs\supervisor.log') { Get-Content '.minit\logs\supervisor.log' }
+            Write-Host '--- app.log ---'; if (Test-Path '.minit\logs\app.log') { Get-Content '.minit\logs\app.log' }
+            throw "deploy failed with $deployCode"
+          }
+          $json = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:9341').Content | ConvertFrom-Json
+          $json | ConvertTo-Json
+          if ($json.sibling_read -ne $false) { throw "sandbox read sibling private file" }
+          if ($json.project_write -ne $false) { throw "sandbox wrote project code" }
+          if ($json.minit_read -ne $false) { throw "sandbox read Minit control state" }
+          if ($json.data_write -ne $true) { throw "sandbox could not write own data" }
+          if ($json.sandbox -ne 'strict') { throw "strict sandbox env missing" }
+          if ($json.network -ne 'shared') { throw "network policy mismatch" }
+          minit stop

@@ -12,6 +12,8 @@ SERVICE_FILE = "service.json"
 SERVICE_SCHEMA_VERSION = 1
 RESTART_POLICIES = {"never", "on-failure", "always"}
 ENVIRONMENT_POLICY = "minimal"
+SANDBOX_POLICY = "strict"
+NETWORK_POLICY = "shared"
 
 SENSITIVE_ARGUMENT_NAMES = {
     "--api-key",
@@ -50,7 +52,7 @@ def build_service_spec(
 
     Commands are stored as an argv list rather than a shell command. Plaintext
     secret values and inherited environment-variable values do not belong in
-    this file.
+    this file. New service specs opt into Minit's strict OS sandbox by default.
     """
     if not command or not all(isinstance(part, str) and part for part in command):
         raise ValueError("command must contain at least one non-empty argument")
@@ -74,6 +76,8 @@ def build_service_spec(
         "port": port,
         "restart_policy": restart_policy,
         "environment_policy": ENVIRONMENT_POLICY,
+        "sandbox_policy": SANDBOX_POLICY,
+        "network_policy": NETWORK_POLICY,
         "autostart": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
