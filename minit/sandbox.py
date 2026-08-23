@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import platform
 import shutil
@@ -52,75 +53,29 @@ def _path_within(path: Path, parent: Path) -> bool:
         return False
 
 
-def _linux_target_dirs(root: Path, home: Path) -> list[str]:
-    if not _path_within(root, home):
-        return []
-    dirs: list[str] = []
-    current = home
-    for part in root.relative_to(home).parts:
-        current = current / part
-        dirs.append(str(current))
-    return dirs
-
-
 def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
-    bwrap = shutil.which("bwrap")
-    if not bwrap:
+    from minit.linux_sandbox_runner import landlock_abi
+
+    abi = landlock_abi()
+    if abi < 1:
         raise SandboxUnavailable(
-            "Strict Linux sandbox requires bubblewrap (`bwrap`). Install the distro package named `bubblewrap`."
+            "Strict Linux sandbox requires a kernel with Landlock support."
         )
-
     root = _project_root(project_dir)
-    data = _data_dir(root)
-    data.mkdir(parents=True, exist_ok=True)
-    home = Path.home().resolve()
-    sandbox_home = _sandbox_home(root)
-    sandbox_tmp = _sandbox_temp(root)
-    staged_project = "/run/minit-sandbox/project"
-    staged_data = "/run/minit-sandbox/data"
-
-    args = [
-        bwrap,
-        "--die-with-parent",
-        "--new-session",
-        "--ro-bind", "/", "/",
-        "--proc", "/proc",
-        "--dev", "/dev",
-        # Capture the host project/data before hiding HOME and .minit. Later
-        # binds use these already-open views as their sources.
-        "--tmpfs", "/run",
-        "--dir", "/run/minit-sandbox",
-        "--ro-bind", str(root), staged_project,
-        "--bind", str(data), staged_data,
-    ]
-
-    if _path_within(root, home):
-        args += ["--tmpfs", str(home)]
-        for directory in _linux_target_dirs(root, home):
-            args += ["--dir", directory]
-    args += ["--ro-bind", staged_project, str(root)]
-
-    # The project view includes .minit, so mask it and re-expose only the app's
-    # own mutable data. Control files, logs, wrapped keys, and backups disappear
-    # from the app namespace.
-    minit_dir = root / MINIT_DIR
-    args += [
-        "--tmpfs", str(minit_dir),
-        "--dir", str(data),
-        "--bind", staged_data, str(data),
-        "--tmpfs", "/tmp",
-        "--chdir", str(root),
-        "--setenv", "HOME", str(sandbox_home),
-        "--setenv", "TMPDIR", str(sandbox_tmp),
-        "--setenv", "TMP", str(sandbox_tmp),
-        "--setenv", "TEMP", str(sandbox_tmp),
-        "--",
-        *command,
-    ]
+    _sandbox_home(root)
+    _sandbox_temp(root)
     return SandboxPlan(
-        command=args,
-        backend="bubblewrap",
-        filesystem_policy="project-readonly-data-readwrite-home-hidden-minit-hidden",
+        command=[
+            sys.executable,
+            "-m",
+            "minit.linux_sandbox_runner",
+            "--project",
+            str(root),
+            "--",
+            *command,
+        ],
+        backend=f"landlock-abi-{abi}",
+        filesystem_policy="project-readonly-data-readwrite-home-denied-minit-hidden",
         network_policy="shared",
     )
 
@@ -129,54 +84,41 @@ def _sbpl_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _macos_project_read_rules(root: Path) -> list[str]:
-    rules: list[str] = []
-    for child in root.iterdir():
-        if child.name == MINIT_DIR:
-            continue
-        kind = "subpath" if child.is_dir() else "literal"
-        rules.append(f'  ({kind} "{_sbpl_escape(str(child.resolve()))}")')
-    return rules
-
-
 def _macos_profile(project_dir: Path) -> str:
     root = _project_root(project_dir)
     data = _data_dir(root)
-    sandbox_home = _sandbox_home(root)
-    sandbox_tmp = _sandbox_temp(root)
+    home = Path.home().resolve()
+    _sandbox_home(root)
+    _sandbox_temp(root)
 
-    readable = {
-        "/System",
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/Library",
-        "/dev",
-        "/private/etc",
-        "/private/var/db",
-        str(Path(sys.executable).resolve().parent),
-        str(Path(sys.prefix).resolve()),
-    }
-    read_rules = [f'  (subpath "{_sbpl_escape(path)}")' for path in sorted(readable)]
-    read_rules.extend(_macos_project_read_rules(root))
-    read_rules.append(f'  (subpath "{_sbpl_escape(str(data))}")')
-    rendered_reads = "\n".join(read_rules)
+    root_s = _sbpl_escape(str(root))
+    data_s = _sbpl_escape(str(data))
+    home_s = _sbpl_escape(str(home))
+    minit_s = _sbpl_escape(str(root / MINIT_DIR))
+
+    # Use the normal macOS execution environment and carve out the sensitive
+    # filesystem boundary with explicit deny rules. `require-not` preserves the
+    # app's own project/data exceptions without maintaining a brittle allowlist
+    # of every framework/runtime file macOS may need to start Python/Node.
+    if _path_within(root, home):
+        home_read_deny = f'''(deny file-read*
+  (require-all
+    (subpath "{home_s}")
+    (require-not (subpath "{root_s}"))))'''
+    else:
+        home_read_deny = f'(deny file-read* (subpath "{home_s}"))'
+
     return f'''(version 1)
-(deny default)
-(allow process*)
-(allow signal (target self))
-(allow sysctl-read)
-(allow mach-lookup)
-(allow ipc-posix-shm)
-(allow network*)
-(allow file-read-metadata)
-(allow file-read*
-{rendered_reads})
-(allow file-write*
-  (subpath "{_sbpl_escape(str(data))}")
-  (subpath "{_sbpl_escape(str(sandbox_home))}")
-  (subpath "{_sbpl_escape(str(sandbox_tmp))}")
-  (subpath "/private/tmp"))
+(allow default)
+{home_read_deny}
+(deny file-read*
+  (require-all
+    (subpath "{minit_s}")
+    (require-not (subpath "{data_s}"))))
+(deny file-write*
+  (require-all
+    (subpath "{home_s}")
+    (require-not (subpath "{data_s}"))))
 '''
 
 
@@ -190,15 +132,49 @@ def _macos_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     return SandboxPlan(
         command=[sandbox_exec, "-p", profile, *command],
         backend="sandbox-exec",
-        filesystem_policy="project-readonly-data-readwrite-home-hidden-minit-hidden",
+        filesystem_policy="project-readonly-data-readwrite-home-denied-minit-hidden",
         network_policy="shared",
     )
 
 
-def windows_app_sid(app_id: str) -> str:
+def _fallback_appcontainer_sid(app_id: str) -> str:
+    # Used only for deterministic non-Windows planning/tests. Real Windows uses
+    # DeriveAppContainerSidFromAppContainerName so the SID is recognized by ACL APIs.
     digest = hashlib.sha256(app_id.encode("utf-8")).digest()
-    parts = [int.from_bytes(digest[i : i + 4], "little") for i in range(0, 16, 4)]
-    return "S-1-5-21-" + "-".join(str(part) for part in parts)
+    parts = [int.from_bytes(digest[i : i + 4], "little") for i in range(0, 28, 4)]
+    return "S-1-15-2-" + "-".join(str(part) for part in parts)
+
+
+def windows_app_sid(app_id: str) -> str:
+    if platform.system() != "Windows":
+        return _fallback_appcontainer_sid(app_id)
+
+    userenv = ctypes.WinDLL("userenv", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    sid_ptr = ctypes.c_void_p()
+    name = "minit." + app_id.lower().replace("-", "")
+    derive = userenv.DeriveAppContainerSidFromAppContainerName
+    derive.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+    derive.restype = ctypes.c_long
+    hr = int(derive(name, ctypes.byref(sid_ptr)))
+    if hr != 0 or not sid_ptr.value:
+        raise SandboxUnavailable(f"Could not derive Windows AppContainer SID (HRESULT 0x{hr & 0xFFFFFFFF:08x}).")
+
+    string_ptr = ctypes.c_wchar_p()
+    convert = advapi32.ConvertSidToStringSidW
+    convert.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    convert.restype = ctypes.c_int
+    try:
+        if not convert(sid_ptr, ctypes.byref(string_ptr)):
+            raise SandboxUnavailable(
+                f"Could not stringify Windows AppContainer SID (WinError {ctypes.get_last_error()})."
+            )
+        return str(string_ptr.value)
+    finally:
+        if string_ptr:
+            kernel32.LocalFree(string_ptr)
+        advapi32.FreeSid(sid_ptr)
 
 
 def _run_icacls(args: list[str]) -> None:
@@ -223,16 +199,19 @@ def prepare_windows_sandbox_acl(project_dir: Path, app_id: str) -> str:
     user_sid = f"*{_windows_user_sid()}"
     system_sid = "*S-1-5-18"
 
-    # Preserve the human owner before breaking broad inheritance. Applying the
-    # root ACL non-recursively lets existing children inherit the new boundary
-    # instead of being temporarily orphaned during a recursive inheritance pass.
-    _run_icacls([str(root), "/grant:r", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F", f"{sid_arg}:(OI)(CI)RX"])
+    _run_icacls([
+        str(root),
+        "/grant:r",
+        f"{user_sid}:(OI)(CI)F",
+        f"{system_sid}:(OI)(CI)F",
+        f"{sid_arg}:(OI)(CI)RX",
+    ])
     _run_icacls([str(root), "/inheritance:r"])
     for broad_sid in ("*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"):
         _run_icacls([str(root), "/remove:g", broad_sid])
 
-    # Minit state is private to the manager. The app gets traverse on .minit
-    # itself and Modify only inside .minit/data.
+    # Remove the app SID from all manager-owned state before granting only
+    # directory traversal and a writable mutable-data subtree.
     if minit_dir.exists():
         _run_icacls([str(minit_dir), "/remove", sid_arg, "/T", "/C"])
         _run_icacls([str(minit_dir), "/grant", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F"])
