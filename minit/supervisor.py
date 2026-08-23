@@ -14,6 +14,7 @@ from minit.environment import app_environment
 from minit.monitoring import ProcessMonitor
 from minit.private_fs import ensure_private_dir, ensure_private_file
 from minit.runtime import app_log_path, clear_control, process_create_time, read_control, save_runtime_state
+from minit.sandbox import sandbox_plan
 from minit.service import load_service_spec
 
 HEALTH_INTERVAL_SECONDS = 2.0
@@ -82,6 +83,10 @@ def _base_state(spec: dict[str, Any], supervisor_pid: int) -> dict[str, Any]:
         "port": spec["port"],
         "restart_policy": spec["restart_policy"],
         "restart_count": 0,
+        "sandbox_policy": spec.get("sandbox_policy", "legacy-unsandboxed"),
+        "sandbox_backend": None,
+        "filesystem_policy": None,
+        "network_policy": spec.get("network_policy", "shared"),
         "metrics": {"available": False},
         "started_at": datetime.now(timezone.utc).isoformat(),
         "last_app_started_at": None,
@@ -122,8 +127,12 @@ def supervise(project_dir: Path) -> int:
 
     def start_app(log_handle: Any) -> subprocess.Popen[Any]:
         nonlocal monitor
+        plan = sandbox_plan(spec, root)
+        state["sandbox_backend"] = plan.backend
+        state["filesystem_policy"] = plan.filesystem_policy
+        state["network_policy"] = plan.network_policy
         process = subprocess.Popen(
-            spec["command"],
+            plan.command,
             cwd=spec["working_dir"],
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
