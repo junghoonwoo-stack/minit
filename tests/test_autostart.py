@@ -15,11 +15,12 @@ def test_linux_unit_runs_local_supervisor_without_secrets(tmp_path: Path):
     spec = configure_local_service(["python", "app.py"], 8000, tmp_path)
 
     unit = render_linux_unit(tmp_path, python_executable="/usr/bin/python3")
+    escaped_root = str(tmp_path.resolve()).replace("\\", "\\\\").replace('"', '\\"')
 
     assert linux_unit_name(spec["app_id"]) in str(linux_unit_name(spec["app_id"]))
     assert "/usr/bin/python3" in unit
     assert "-m minit.supervisor" in unit
-    assert str(tmp_path.resolve()) in unit
+    assert f'"{escaped_root}"' in unit
     assert "OPENAI_API_KEY" not in unit
     assert "Environment=" not in unit
 
