@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from minit.ports import PortAllocationError, choose_available_port
 from minit.service import load_service_spec
 
 
@@ -53,6 +54,15 @@ def _read_text(path: Path, max_bytes: int = 512_000) -> str:
         return ""
 
 
+def _auto_port(preferred: int, root: Path, requested_port: int | None) -> int:
+    if requested_port is not None:
+        return requested_port
+    try:
+        return choose_available_port(preferred, project_dir=root)
+    except PortAllocationError as exc:
+        raise DetectionError(str(exc)) from exc
+
+
 def _python_candidates(root: Path) -> Iterable[Path]:
     preferred = ["app.py", "main.py", "server.py", "web.py", "streamlit_app.py"]
     seen: set[Path] = set()
@@ -75,7 +85,7 @@ def _detect_python(root: Path, requested_port: int | None) -> DeployPlan | None:
 
         streamlit = "import streamlit" in text or "from streamlit" in text
         if streamlit:
-            port = requested_port or _first_port(text) or 8501
+            port = _auto_port(_first_port(text) or 8501, root, requested_port)
             return DeployPlan(
                 ["python", "-m", "streamlit", "run", path.name, "--server.address", "127.0.0.1", "--server.port", str(port)],
                 port,
@@ -85,7 +95,7 @@ def _detect_python(root: Path, requested_port: int | None) -> DeployPlan | None:
 
         fastapi_match = re.search(r"(?m)^\s*([A-Za-z_]\w*)\s*=\s*FastAPI\s*\(", text)
         if fastapi_match:
-            port = requested_port or _first_port(text) or 8000
+            port = _auto_port(_first_port(text) or 8000, root, requested_port)
             app_var = fastapi_match.group(1)
             return DeployPlan(
                 ["python", "-m", "uvicorn", f"{module}:{app_var}", "--host", "127.0.0.1", "--port", str(port)],
@@ -96,7 +106,7 @@ def _detect_python(root: Path, requested_port: int | None) -> DeployPlan | None:
 
         flask_match = re.search(r"(?m)^\s*([A-Za-z_]\w*)\s*=\s*Flask\s*\(", text)
         if flask_match:
-            port = requested_port or _first_port(text) or 8000
+            port = _auto_port(_first_port(text) or 8000, root, requested_port)
             app_var = flask_match.group(1)
             return DeployPlan(
                 ["python", "-m", "flask", "--app", f"{module}:{app_var}", "run", "--host", "127.0.0.1", "--port", str(port)],
@@ -146,18 +156,40 @@ def _detect_node(root: Path, requested_port: int | None) -> DeployPlan | None:
     explicit_port = _first_port(script)
 
     if "vite" in dependencies or re.search(r"\bvite\b", script):
-        port = requested_port or explicit_port or 5173
-        command = ["npm", "run", script_name]
-        if explicit_port is None or "--host" not in script:
-            command += ["--", "--host", "127.0.0.1", "--port", str(port)]
-        return DeployPlan(command, port, "vite", "package.json")
+        if explicit_port is not None:
+            if requested_port is not None and requested_port != explicit_port:
+                raise DetectionError(
+                    f"package.json Vite script appears to use fixed port {explicit_port}; cannot safely override it with {requested_port}."
+                )
+            port = explicit_port
+            command = ["npm", "run", script_name]
+            if "--host" not in script:
+                command += ["--", "--host", "127.0.0.1"]
+            return DeployPlan(command, port, "vite", "package.json")
+
+        port = _auto_port(5173, root, requested_port)
+        return DeployPlan(
+            ["npm", "run", script_name, "--", "--host", "127.0.0.1", "--port", str(port)],
+            port,
+            "vite",
+            "package.json",
+        )
 
     if "next" in dependencies or re.search(r"\bnext\s+(?:dev|start)\b", script):
-        port = requested_port or explicit_port or 3000
-        command = ["npm", "run", script_name]
-        if explicit_port is None:
-            command += ["--", "--hostname", "127.0.0.1", "--port", str(port)]
-        return DeployPlan(command, port, "nextjs", "package.json")
+        if explicit_port is not None:
+            if requested_port is not None and requested_port != explicit_port:
+                raise DetectionError(
+                    f"package.json Next.js script appears to use fixed port {explicit_port}; cannot safely override it with {requested_port}."
+                )
+            return DeployPlan(["npm", "run", script_name], explicit_port, "nextjs", "package.json")
+
+        port = _auto_port(3000, root, requested_port)
+        return DeployPlan(
+            ["npm", "run", script_name, "--", "--hostname", "127.0.0.1", "--port", str(port)],
+            port,
+            "nextjs",
+            "package.json",
+        )
 
     if explicit_port is not None:
         if requested_port is not None and requested_port != explicit_port:
@@ -192,7 +224,7 @@ def detect_deploy_plan(project_dir: Path | None = None, requested_port: int | No
         return python
 
     if (root / "index.html").is_file():
-        port = requested_port or 8000
+        port = _auto_port(8000, root, requested_port)
         return DeployPlan(
             ["python", "-m", "http.server", str(port), "--bind", "127.0.0.1"],
             port,
