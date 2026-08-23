@@ -17,9 +17,9 @@ minit deploy
       ↓
 your PC keeps it running
       ↓
-monitor · restart · version · backup · manage
+minit ls · status · restart · logs · backup
       ↓
-optionally share it with other people
+optionally share or administer it remotely
 ```
 
 **Application code, data, secrets, keys, and compute stay local.** Optional Minit cloud services are for administration, aggregate operational metadata, and encrypted backup storage — not application hosting.
@@ -30,28 +30,40 @@ No app upload. No cloud compute required for the app runtime. No separate server
 
 **Website:** https://junghoonwoo-stack.github.io/minit/
 
-> **Release note:** PyPI `0.1.0` currently provides the temporary `minit run` sharing workflow. Persistent local `minit deploy` and the local manager are on development `main` / `0.2.0.dev0` and are not yet in the stable PyPI release.
+> **Release note:** PyPI `0.1.0` currently provides the temporary `minit run` sharing workflow. The one-command local manager below is on development `main` / `0.2.0.dev0` and is not yet in the stable PyPI release.
 
-## The two modes
+## The local Vercel experience
 
-### `minit deploy` — keep it running on this computer
+For common web projects, development `main` can safely detect how to run the app:
 
-Development `main` supports:
+```bash
+cd my-app
+minit deploy
+```
+
+Minit currently recognizes common patterns including static `index.html`, FastAPI, Flask, Streamlit, Vite, Next.js, and previously configured Minit services. Detection is deliberately fail-closed: if Minit is not confident, it asks for an explicit command instead of guessing.
+
+You can always be explicit:
 
 ```bash
 minit deploy --port 8000 -- python app.py
 ```
 
-Minit starts a detached local supervisor. The terminal can close and the app continues to run **on this PC**.
+Once deployed, the app runs through a detached local supervisor. Closing the terminal does not stop the app.
+
+From anywhere on the computer:
 
 ```bash
-minit status
-minit logs
-minit restart
-minit stop
+minit ls
+minit status my-app
+minit restart my-app
+minit logs my-app
+minit stop my-app
 ```
 
-The local manager handles health checks, crash restart, CPU/RAM monitoring, local secrets, snapshots/rollback, encrypted data backup, recovery, and user-level autostart.
+`minit ls` uses a small local registry to locate managed projects. The registry contains operational locators such as app ID, project path, and port; it does **not** copy application data, secrets, commands, or raw logs into a central cloud service.
+
+The local manager also provides health checks, crash restart, CPU/RAM monitoring, encrypted local secrets, source/config snapshots and rollback, encrypted mutable-data backup, recovery, and user-level autostart adapters.
 
 `minit deploy` means:
 
@@ -61,7 +73,7 @@ It does **not** mean:
 
 > Upload this app to Minit cloud.
 
-### `minit run` — temporarily share what is already running
+## `minit run` — temporary sharing
 
 The stable `0.1.0` release supports:
 
@@ -71,9 +83,11 @@ minit run --port 8000
 
 Minit creates a temporary public URL to an app already running locally. The app process and compute remain on your computer. Stop the command and the temporary public path closes.
 
+Current `minit run` uses a Cloudflare Quick Tunnel and is a convenience/demo path, **not** the target architecture for private end-to-end remote access.
+
 ## Install
 
-Stable PyPI release:
+### Stable PyPI release (`0.1.0`)
 
 ```bash
 pipx install minit-runtime
@@ -87,12 +101,27 @@ uv tool install minit-runtime
 
 The Python package is named `minit-runtime`; the command is `minit`.
 
-To try the current local-manager development version:
+### Try the current local-manager development version
+
+For dogfooding before an alpha release:
+
+```bash
+pipx install --force "git+https://github.com/junghoonwoo-stack/minit.git@main"
+```
+
+or clone the repository:
 
 ```bash
 git clone https://github.com/junghoonwoo-stack/minit.git
 cd minit
 pip install -e .
+```
+
+Then enter a web project and try:
+
+```bash
+minit deploy
+minit ls
 ```
 
 ## Why local deployment?
@@ -165,22 +194,22 @@ Remote infrastructure can still be attacked for availability and may observe del
 
 See [Threat Model](docs/THREAT_MODEL.md), [Architecture](docs/ARCHITECTURE.md), and [Product Principles](docs/PRODUCT.md).
 
-## Try the released sharing flow in one minute
+## Development validation
 
-In one terminal:
+The current one-command deploy/global-registry work is exercised in the repository's cross-platform CI on Ubuntu, Windows, and macOS, with a separate wheel build/install smoke test.
 
-```bash
-python -c "from pathlib import Path; p=Path('minit-demo'); p.mkdir(exist_ok=True); (p/'index.html').write_text('Hello from Minit')"
-python -m http.server 8000 --directory minit-demo
+Live dogfooding has also exercised multiple local apps through:
+
+```text
+install current main
+→ minit deploy
+→ local HTTP health
+→ minit run
+→ public URL
+→ external GET/POST verification
 ```
 
-In another terminal:
-
-```bash
-minit run --port 8000
-```
-
-Open the generated URL from another device.
+That dogfood found and fixed a real concurrent first-run networking-helper installation race; a regression test now protects that path.
 
 ## Current development focus
 
@@ -188,7 +217,7 @@ The near-term goal is deliberately narrow:
 
 > **Make local app deployment private, simple, and boringly reliable.**
 
-Current work is focused on local sandboxing, real-device persistence/key-store validation, encrypted backup/recovery, privacy-safe administration, and secure connectivity. Remix, marketplace, discovery, and creator monetization are intentionally on hold.
+Current work is focused on real-device persistence/key-store validation, local sandboxing, encrypted backup/recovery, privacy-safe administration, and secure connectivity. Remix, marketplace, discovery, and creator monetization are intentionally on hold.
 
 ---
 
@@ -198,9 +227,30 @@ Current work is focused on local sandboxing, real-device persistence/key-store v
 
 > **내 PC가 서버입니다.**
 
-Minit을 빠르게 설명하면 **AI 앱을 위한 오픈소스 “Local Vercel”**이라고 볼 수 있습니다. Vercel처럼 deploy와 운영은 쉽게 만들되, 앱을 다른 회사의 compute로 옮기지 않고 **내 컴퓨터가 계속 runtime**이 됩니다.
+Minit을 빠르게 설명하면 **AI 앱을 위한 오픈소스 “Local Vercel”**입니다. Vercel처럼 deploy와 운영은 쉽게 만들되, 앱을 다른 회사의 compute로 옮기지 않고 **내 컴퓨터가 계속 runtime**이 됩니다.
 
 Claude Code, Codex, Cursor 등으로 만든 앱을 굳이 별도 클라우드 서버로 옮기지 않고 **지금 사용하고 있는 컴퓨터에서 계속 실행**하는 것이 Minit의 중심 방향입니다.
+
+개발 `main`에서는 일반적인 웹 프로젝트라면 우선 이것부터 시도할 수 있습니다.
+
+```bash
+cd my-app
+minit deploy
+```
+
+Minit이 확실히 판단할 수 있는 경우 실행 방식과 port를 자동으로 찾습니다. 애매하면 임의로 실행하지 않고 명시적인 command를 요청합니다.
+
+여러 앱이 생기면 어느 폴더에서든:
+
+```bash
+minit ls
+minit status my-app
+minit restart my-app
+minit logs my-app
+minit stop my-app
+```
+
+로 관리합니다.
 
 ```text
 AI로 앱 개발
@@ -209,22 +259,28 @@ minit deploy
    ↓
 내 PC에서 지속 실행
    ↓
-상태 확인 · 자동 재시작 · 버전 · 백업 · 관리
+minit ls · 상태 확인 · 재시작 · 로그 · 백업
    ↓
 필요하면 다른 사용자에게 공유
 ```
 
 앱의 **코드·데이터·secret·암호화 key·실행 compute는 로컬**에 남습니다. 선택적인 Minit cloud는 앱을 hosting하는 곳이 아니라 운영 통계 집계와 관리, 이미 암호화된 backup 보관 등을 위한 보조 layer입니다.
 
-현재 PyPI `0.1.0`은 임시 공유 기능인 `minit run`을 제공합니다. `minit deploy`를 포함한 persistent local manager는 현재 `main / 0.2.0.dev0`에서 개발 중입니다.
+현재 PyPI `0.1.0`은 임시 공유 기능인 `minit run`을 제공합니다. `minit deploy`를 포함한 one-command persistent local manager는 현재 `main / 0.2.0.dev0`에서 개발 중입니다.
 
 ### `minit deploy`
 
 ```bash
-minit deploy --port 8000 -- python app.py
+minit deploy
 ```
 
 의 의미는 **“이 앱을 이 컴퓨터에서 계속 실행해줘”** 입니다. Minit cloud로 앱을 upload한다는 뜻이 아닙니다.
+
+필요하면 기존처럼 명시적으로 지정할 수 있습니다.
+
+```bash
+minit deploy --port 8000 -- python app.py
+```
 
 Minit은 local process를 background에서 관리하고 health check, crash restart, monitoring, local secret, snapshot/rollback, encrypted backup, recovery, autostart 등을 담당합니다.
 
@@ -234,7 +290,7 @@ Minit은 local process를 background에서 관리하고 health check, crash rest
 minit run --port 8000
 ```
 
-은 현재 실행 중인 local app을 임시 public URL로 공유합니다. compute는 계속 내 PC에 있고, command를 종료하면 공개 경로도 닫힙니다.
+은 현재 실행 중인 local app을 임시 public URL로 공유합니다. compute는 계속 내 PC에 있습니다. 현재 Quick Tunnel은 임시 공유용이며 향후 private E2E access의 최종 구조는 아닙니다.
 
 ## 핵심 구조
 
