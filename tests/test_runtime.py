@@ -1,10 +1,13 @@
 import json
+import os
 from pathlib import Path
 
 from minit.runtime import (
     _is_fresh_runtime_generation,
     app_log_path,
     load_runtime_state,
+    pid_is_alive,
+    process_create_time,
     runtime_state_path,
     save_runtime_state,
     stop_local_service,
@@ -50,6 +53,15 @@ def test_fresh_runtime_generation_does_not_require_launcher_pid_identity():
         app_id="another-app",
         previous_started_at=None,
     )
+
+
+def test_pid_liveness_is_bound_to_process_generation():
+    pid = os.getpid()
+    created_at = process_create_time(pid)
+
+    assert created_at is not None
+    assert pid_is_alive(pid, created_at)
+    assert not pid_is_alive(pid, created_at + 60.0)
 
 
 def test_app_logs_are_kept_under_local_minit_directory(tmp_path: Path):
