@@ -39,9 +39,11 @@ def test_concurrent_first_run_installs_cloudflared_once(tmp_path: Path, monkeypa
     for thread in threads:
         thread.join(timeout=5)
 
-    expected = str(tmp_path / "cloudflared")
+    filename = "cloudflared.exe" if cli.os.name == "nt" else "cloudflared"
+    installed = tmp_path / filename
+    expected = str(installed)
     assert not errors
     assert calls == 1
     assert results == [expected] * 4
-    assert (tmp_path / "cloudflared").read_bytes() == b"verified-cloudflared"
+    assert installed.read_bytes() == b"verified-cloudflared"
     assert not (tmp_path / ".cloudflared.install.lock").exists()
