@@ -84,6 +84,26 @@ def test_deploy_auto_detects_static_app(tmp_path: Path, monkeypatch):
     assert spec["command"] == ["python", "-m", "http.server", "8000", "--bind", "127.0.0.1"]
 
 
+def test_repeated_one_command_deploy_is_idempotent_for_running_minit_service(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINIT_HOME", str(tmp_path / "home"))
+    create_manifest(tmp_path, name="demo-app")
+    configure_local_service(["python", "app.py"], 8000, tmp_path)
+
+    with patch("minit.main.runtime_is_running", return_value=True), patch(
+        "minit.main.load_runtime_state", return_value={"status": "running"}
+    ), patch("minit.main.start_local_service") as start_mock, patch(
+        "minit.main._port_open"
+    ) as port_mock:
+        result = runner.invoke(app, ["deploy"])
+
+    assert result.exit_code == 0
+    assert "Already running" in result.stdout
+    assert "No redeploy was needed" in result.stdout
+    start_mock.assert_not_called()
+    port_mock.assert_not_called()
+
+
 def test_deploy_ambiguous_project_fails_cleanly(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -130,3 +150,26 @@ def test_ls_and_targeted_status_work_outside_project(tmp_path: Path, monkeypatch
     assert "alpha" in status.stdout
     assert "project:" in status.stdout
     assert "status source:   local only" in status.stdout
+
+
+def test_open_targeted_app_uses_local_address_only(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "apps" / "alpha"
+    elsewhere = tmp_path / "elsewhere"
+    project.mkdir(parents=True)
+    elsewhere.mkdir()
+    monkeypatch.setenv("MINIT_HOME", str(home))
+    create_manifest(project, name="alpha")
+    configure_local_service(["python", "app.py"], 8123, project)
+    register_project(project)
+    monkeypatch.chdir(elsewhere)
+
+    with patch("minit.main.runtime_is_running", return_value=True), patch(
+        "minit.main._port_open", return_value=True
+    ), patch("minit.main.webbrowser.open", return_value=True) as browser_open:
+        result = runner.invoke(app, ["open", "alpha"])
+
+    assert result.exit_code == 0
+    assert "http://127.0.0.1:8123" in result.stdout
+    assert "no public sharing" in result.stdout
+    browser_open.assert_called_once_with("http://127.0.0.1:8123")
