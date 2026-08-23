@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -28,7 +29,47 @@ from minit.state import (
 )
 
 app = typer.Typer(no_args_is_help=True, help="Publish local apps from your own computer.")
-console = Console()
+
+_ASCII_FALLBACKS = str.maketrans(
+    {
+        "✓": "OK",
+        "→": "->",
+        "—": "-",
+        "–": "-",
+        "…": "...",
+        "•": "*",
+    }
+)
+
+
+class MinitConsole(Console):
+    """Rich console that degrades Minit's decorative glyphs safely.
+
+    Some Windows hosts still expose a cp1252-style console even when the
+    underlying application is healthy. Operational CLI output must never turn
+    a successful deploy into a failure just because a decorative glyph such as
+    a check mark is not representable by that stream.
+    """
+
+    def _safe_string(self, value: str) -> str:
+        encoding = getattr(self.file, "encoding", None) or "utf-8"
+        try:
+            value.encode(encoding)
+            return value
+        except (LookupError, UnicodeEncodeError):
+            simplified = value.translate(_ASCII_FALLBACKS)
+            try:
+                simplified.encode(encoding)
+                return simplified
+            except (LookupError, UnicodeEncodeError):
+                return simplified.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+    def print(self, *objects: Any, **kwargs: Any) -> None:
+        safe_objects = tuple(self._safe_string(obj) if isinstance(obj, str) else obj for obj in objects)
+        super().print(*safe_objects, **kwargs)
+
+
+console = MinitConsole(safe_box=True)
 
 COMMON_PORTS = (3000, 5173, 8000, 8080, 8501, 8888)
 URL_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
