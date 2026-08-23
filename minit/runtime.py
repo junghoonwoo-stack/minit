@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from minit.environment import supervisor_environment
 from minit.private_fs import atomic_write_json, ensure_private_dir, ensure_private_file
 from minit.service import load_service_spec
@@ -20,6 +22,7 @@ CONTROL_FILE = "control.json"
 LOG_DIR = "logs"
 APP_LOG_FILE = "app.log"
 SUPERVISOR_LOG_FILE = "supervisor.log"
+_PROCESS_CREATE_TIME_TOLERANCE_SECONDS = 0.05
 
 
 def _project_root(project_dir: Path | None = None) -> Path:
@@ -98,19 +101,57 @@ def read_control(project_dir: Path | None = None) -> dict[str, Any] | None:
         return None
 
 
-def pid_is_alive(pid: int | None) -> bool:
+def process_create_time(pid: int | None) -> float | None:
+    if not pid or pid <= 0:
+        return None
+    try:
+        return float(psutil.Process(pid).create_time())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+
+
+def pid_is_alive(pid: int | None, expected_create_time: float | None = None) -> bool:
+    """Return whether a process identity is still alive.
+
+    `os.kill(pid, 0)` is not a reliable liveness probe for detached processes on
+    Windows. psutil provides the cross-platform process query we already depend
+    on. When a create time is available we also bind the check to that process
+    generation so a recycled PID cannot make Minit control an unrelated process.
+    """
     if not pid or pid <= 0:
         return False
     try:
-        os.kill(pid, 0)
-    except OSError:
+        process = psutil.Process(pid)
+        if expected_create_time is not None:
+            try:
+                actual_create_time = float(process.create_time())
+            except psutil.AccessDenied:
+                return False
+            if abs(actual_create_time - float(expected_create_time)) > _PROCESS_CREATE_TIME_TOLERANCE_SECONDS:
+                return False
+        if not process.is_running():
+            return False
+        try:
+            return process.status() != psutil.STATUS_ZOMBIE
+        except psutil.AccessDenied:
+            # If we already verified the generation, or no generation was
+            # recorded by an older runtime, existence is the best safe signal.
+            return True
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
         return False
-    return True
+    except psutil.AccessDenied:
+        return expected_create_time is None
 
 
 def runtime_is_running(project_dir: Path | None = None) -> bool:
     state = load_runtime_state(project_dir)
-    return bool(state and pid_is_alive(state.get("supervisor_pid")))
+    return bool(
+        state
+        and pid_is_alive(
+            state.get("supervisor_pid"),
+            state.get("supervisor_create_time"),
+        )
+    )
 
 
 def _is_fresh_runtime_generation(
@@ -125,8 +166,8 @@ def _is_fresh_runtime_generation(
     return bool(started_at and started_at != previous_started_at)
 
 
-def _force_terminate(pid: int | None) -> None:
-    if not pid or not pid_is_alive(pid):
+def _force_terminate(pid: int | None, expected_create_time: float | None = None) -> None:
+    if not pid or not pid_is_alive(pid, expected_create_time):
         return
 
     if os.name == "nt":
@@ -143,7 +184,7 @@ def _force_terminate(pid: int | None) -> None:
     except OSError:
         return
     for _ in range(20):
-        if not pid_is_alive(pid):
+        if not pid_is_alive(pid, expected_create_time):
             return
         time.sleep(0.1)
     try:
@@ -207,7 +248,14 @@ def start_local_service(project_dir: Path | None = None, timeout_seconds: float 
             # identity for the long-lived detached supervisor. If a fresh
             # runtime generation has already appeared and its recorded
             # supervisor is alive, continue waiting for its health state.
-            if fresh and state is not None and pid_is_alive(state.get("supervisor_pid")):
+            if (
+                fresh
+                and state is not None
+                and pid_is_alive(
+                    state.get("supervisor_pid"),
+                    state.get("supervisor_create_time"),
+                )
+            ):
                 time.sleep(0.1)
                 continue
             raise RuntimeError("Local supervisor exited during startup.")
@@ -225,9 +273,18 @@ def stop_local_service(project_dir: Path | None = None, timeout_seconds: float =
         return None
 
     supervisor_pid = state.get("supervisor_pid")
-    if not pid_is_alive(supervisor_pid):
+    supervisor_create_time = state.get("supervisor_create_time")
+    app_pid = state.get("app_pid")
+    app_create_time = state.get("app_create_time")
+
+    if not pid_is_alive(supervisor_pid, supervisor_create_time):
+        # A supervisor can die unexpectedly while leaving its child behind.
+        # Kill only the exact recorded app generation; never a recycled PID.
+        _force_terminate(app_pid, app_create_time)
         state["status"] = "stopped"
+        state["health"] = "stopped"
         state["app_pid"] = None
+        state["app_create_time"] = None
         state["stopped_at"] = state.get("stopped_at") or datetime.now(timezone.utc).isoformat()
         save_runtime_state(state, root)
         return state
@@ -235,18 +292,20 @@ def stop_local_service(project_dir: Path | None = None, timeout_seconds: float =
     _write_control("stop", root)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if not pid_is_alive(supervisor_pid):
+        if not pid_is_alive(supervisor_pid, supervisor_create_time):
             break
         time.sleep(0.1)
 
-    if pid_is_alive(supervisor_pid):
-        _force_terminate(state.get("app_pid"))
-        _force_terminate(supervisor_pid)
+    if pid_is_alive(supervisor_pid, supervisor_create_time):
+        _force_terminate(app_pid, app_create_time)
+        _force_terminate(supervisor_pid, supervisor_create_time)
 
     clear_control(root)
     final = load_runtime_state(root) or state
     final["status"] = "stopped"
+    final["health"] = "stopped"
     final["app_pid"] = None
+    final["app_create_time"] = None
     final["stopped_at"] = final.get("stopped_at") or datetime.now(timezone.utc).isoformat()
     save_runtime_state(final, root)
     return final
