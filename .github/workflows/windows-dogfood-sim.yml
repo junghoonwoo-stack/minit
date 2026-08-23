@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/windows-dogfood-sim.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/windows-dogfood-sim.yml"
   workflow_dispatch:
 
 permissions:
@@ -149,7 +152,7 @@ jobs:
           @'
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import os, sys, time
+import sys, time
 marker = Path("crashed-once.marker")
 if not marker.exists():
     marker.write_text("1")
