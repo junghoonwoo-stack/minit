@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import platform
 import shutil
 import subprocess
@@ -53,6 +52,17 @@ def _path_within(path: Path, parent: Path) -> bool:
         return False
 
 
+def _linux_target_dirs(root: Path, home: Path) -> list[str]:
+    if not _path_within(root, home):
+        return []
+    dirs: list[str] = []
+    current = home
+    for part in root.relative_to(home).parts:
+        current = current / part
+        dirs.append(str(current))
+    return dirs
+
+
 def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     bwrap = shutil.which("bwrap")
     if not bwrap:
@@ -66,6 +76,8 @@ def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
     home = Path.home().resolve()
     sandbox_home = _sandbox_home(root)
     sandbox_tmp = _sandbox_temp(root)
+    staged_project = "/run/minit-sandbox/project"
+    staged_data = "/run/minit-sandbox/data"
 
     args = [
         bwrap,
@@ -74,20 +86,28 @@ def _linux_plan(command: list[str], project_dir: Path) -> SandboxPlan:
         "--ro-bind", "/", "/",
         "--proc", "/proc",
         "--dev", "/dev",
+        # Capture the host project/data before hiding HOME and .minit. Later
+        # binds use these already-open views as their sources.
+        "--tmpfs", "/run",
+        "--dir", "/run/minit-sandbox",
+        "--ro-bind", str(root), staged_project,
+        "--bind", str(data), staged_data,
     ]
 
-    # Bubblewrap opens bind sources from the parent namespace, so the user's
-    # home can be masked before selected project/data paths are remounted.
     if _path_within(root, home):
         args += ["--tmpfs", str(home)]
-    args += ["--ro-bind", str(root), str(root)]
+        for directory in _linux_target_dirs(root, home):
+            args += ["--dir", directory]
+    args += ["--ro-bind", staged_project, str(root)]
 
-    # The project bind contains .minit, so mask it and re-expose only mutable
-    # app data. The manager's keys/config/logs stay outside the app namespace.
+    # The project view includes .minit, so mask it and re-expose only the app's
+    # own mutable data. Control files, logs, wrapped keys, and backups disappear
+    # from the app namespace.
     minit_dir = root / MINIT_DIR
     args += [
         "--tmpfs", str(minit_dir),
-        "--bind", str(data), str(data),
+        "--dir", str(data),
+        "--bind", staged_data, str(data),
         "--tmpfs", "/tmp",
         "--chdir", str(root),
         "--setenv", "HOME", str(sandbox_home),
@@ -203,28 +223,17 @@ def prepare_windows_sandbox_acl(project_dir: Path, app_id: str) -> str:
     user_sid = f"*{_windows_user_sid()}"
     system_sid = "*S-1-5-18"
 
-    # Break broad parent inheritance so BUILTIN\Users cannot accidentally give
-    # the restricted process write access. Keep the human owner and SYSTEM in
-    # full control, while the app-specific restricting SID receives RX only.
-    _run_icacls([str(root), "/inheritance:r", "/T", "/C"])
-    _run_icacls(
-        [
-            str(root),
-            "/grant:r",
-            f"{user_sid}:(OI)(CI)F",
-            f"{system_sid}:(OI)(CI)F",
-            f"{sid_arg}:(OI)(CI)RX",
-            "/T",
-            "/C",
-        ]
-    )
+    # Preserve the human owner before breaking broad inheritance. Applying the
+    # root ACL non-recursively lets existing children inherit the new boundary
+    # instead of being temporarily orphaned during a recursive inheritance pass.
+    _run_icacls([str(root), "/grant:r", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F", f"{sid_arg}:(OI)(CI)RX"])
+    _run_icacls([str(root), "/inheritance:r"])
     for broad_sid in ("*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"):
-        _run_icacls([str(root), "/remove:g", broad_sid, "/T", "/C"])
+        _run_icacls([str(root), "/remove:g", broad_sid])
 
-    # Hide Minit control/key material. The app may traverse .minit only to its
-    # dedicated data directory, which receives Modify rights.
+    # Minit state is private to the manager. The app gets traverse on .minit
+    # itself and Modify only inside .minit/data.
     if minit_dir.exists():
-        _run_icacls([str(minit_dir), "/inheritance:r", "/T", "/C"])
         _run_icacls([str(minit_dir), "/remove", sid_arg, "/T", "/C"])
         _run_icacls([str(minit_dir), "/grant", f"{user_sid}:(OI)(CI)F", f"{system_sid}:(OI)(CI)F"])
         _run_icacls([str(minit_dir), "/grant", f"{sid_arg}:(RX)"])
