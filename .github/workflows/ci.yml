@@ -111,3 +111,240 @@ jobs:
 
       - name: Smoke test CLI
         run: /tmp/minit-package-test/bin/minit --help
+
+  windows-dogfood-fresh-static:
+    name: "Dogfood 1 · Win2022 fresh static + shell boundary"
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fresh isolated install from main
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-dogfood-venv"
+          & "$env:RUNNER_TEMP\minit-dogfood-venv\Scripts\python.exe" -m pip install --upgrade pip
+          & "$env:RUNNER_TEMP\minit-dogfood-venv\Scripts\pip.exe" install "git+https://github.com/junghoonwoo-stack/minit.git@main"
+          & "$env:RUNNER_TEMP\minit-dogfood-venv\Scripts\minit.exe" --help | Out-Null
+      - name: Deploy static app from path with spaces
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\Minit Dogfood Apps\Alpha App"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content -Path "$app\index.html" -Value "win2022-static-ok"
+          Set-Location $app
+          & "$env:RUNNER_TEMP\minit-dogfood-venv\Scripts\minit.exe" deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+          $spec = Get-Content ".minit\service.json" | ConvertFrom-Json
+          if ([int]$spec.port -ne 8000) { throw "Expected first auto port 8000, got $($spec.port)" }
+      - name: Verify in a fresh shell after deploy shell exited
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-dogfood-venv\Scripts\minit.exe"
+          Start-Sleep -Seconds 2
+          $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000").Content
+          if ($body -notmatch "win2022-static-ok") { throw "App did not survive shell boundary" }
+          & $minit ls
+          & $minit status "Alpha App"
+          & $minit stop "Alpha App"
+          Start-Sleep -Seconds 1
+          $reachable = $true
+          try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000" -TimeoutSec 2 | Out-Null } catch { $reachable = $false }
+          if ($reachable) { throw "Port 8000 remained reachable after targeted stop" }
+
+  windows-dogfood-multiapp:
+    name: "Dogfood 2 · Win2025 three apps + ports + lifecycle"
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install current package
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-multi-venv"
+          & "$env:RUNNER_TEMP\minit-multi-venv\Scripts\pip.exe" install .
+      - name: Deploy three default-port static apps
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-multi-venv\Scripts\minit.exe"
+          $root = "$env:RUNNER_TEMP\multiapps"
+          $names = @("alpha", "beta", "gamma")
+          foreach ($name in $names) {
+            $dir = Join-Path $root $name
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Set-Content -Path (Join-Path $dir "index.html") -Value "dogfood-$name"
+            Push-Location $dir
+            & $minit deploy
+            if ($LASTEXITCODE -ne 0) { throw "deploy failed for $name" }
+            Pop-Location
+          }
+          $ports = @()
+          foreach ($name in $names) {
+            $spec = Get-Content (Join-Path $root "$name\.minit\service.json") | ConvertFrom-Json
+            $ports += [int]$spec.port
+          }
+          if (($ports -join ',') -ne '8000,8001,8002') { throw "Unexpected ports: $($ports -join ',')" }
+          foreach ($i in 0..2) {
+            $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$($ports[$i])").Content
+            if ($body -notmatch "dogfood-$($names[$i])") { throw "Wrong app response" }
+          }
+      - name: Target lifecycle from neutral directory
+        shell: pwsh
+        run: |
+          $minit = "$env:RUNNER_TEMP\minit-multi-venv\Scripts\minit.exe"
+          Set-Location $env:RUNNER_TEMP
+          & $minit ls
+          & $minit stop beta
+          Start-Sleep -Seconds 1
+          (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000").Content | Out-Null
+          (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8002").Content | Out-Null
+          $betaReachable = $true
+          try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8001" -TimeoutSec 2 | Out-Null } catch { $betaReachable = $false }
+          if ($betaReachable) { throw "beta still reachable after stop" }
+          & $minit restart beta
+          Start-Sleep -Seconds 2
+          $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8001").Content
+          if ($body -notmatch "dogfood-beta") { throw "beta failed targeted restart" }
+          & $minit stop alpha
+          & $minit stop beta
+          & $minit stop gamma
+
+  windows-dogfood-crash:
+    name: "Dogfood 3 · Win2022 crash recovery + long path"
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-crash-venv"
+          & "$env:RUNNER_TEMP\minit-crash-venv\Scripts\pip.exe" install .
+      - name: Create crash-once app and deploy
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\A fairly long Minit dogfood directory with spaces\Crash Recovery Application"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          @'
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import sys, time
+marker = Path("crashed-once.marker")
+if not marker.exists():
+    marker.write_text("1")
+    time.sleep(0.4)
+    sys.exit(7)
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"crash-recovery-ok"
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *args): pass
+ThreadingHTTPServer(("127.0.0.1", 9123), H).serve_forever()
+'@ | Set-Content -Encoding UTF8 "$app\server.py"
+          Set-Location $app
+          & "$env:RUNNER_TEMP\minit-crash-venv\Scripts\minit.exe" deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+          Start-Sleep -Seconds 2
+          $runtime = Get-Content ".minit\runtime.json" | ConvertFrom-Json
+          if ([int]$runtime.restart_count -lt 1) { throw "Expected crash restart during initial deploy" }
+          $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:9123").Content
+          if ($body -notmatch "crash-recovery-ok") { throw "Recovered app is unhealthy" }
+      - name: Kill child process and verify supervisor restarts it again
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\A fairly long Minit dogfood directory with spaces\Crash Recovery Application"
+          $minit = "$env:RUNNER_TEMP\minit-crash-venv\Scripts\minit.exe"
+          $runtime = Get-Content "$app\.minit\runtime.json" | ConvertFrom-Json
+          $oldPid = [int]$runtime.app_pid
+          $oldRestarts = [int]$runtime.restart_count
+          Stop-Process -Id $oldPid -Force
+          $ok = $false
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 500
+            $runtime = Get-Content "$app\.minit\runtime.json" | ConvertFrom-Json
+            if ($runtime.app_pid -and [int]$runtime.app_pid -ne $oldPid -and [int]$runtime.restart_count -gt $oldRestarts) {
+              try {
+                $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:9123" -TimeoutSec 2).Content
+                if ($body -match "crash-recovery-ok") { $ok = $true; break }
+              } catch {}
+            }
+          }
+          if (-not $ok) { throw "Supervisor did not recover from forced child termination" }
+          Set-Location $env:RUNNER_TEMP
+          & $minit stop "Crash Recovery Application"
+
+  windows-dogfood-security-autostart:
+    name: "Dogfood 4 · Win2025 Credential Manager + Task Scheduler"
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and create app
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\minit-security-venv"
+          & "$env:RUNNER_TEMP\minit-security-venv\Scripts\pip.exe" install .
+          $app = "$env:RUNNER_TEMP\security-app"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content "$app\index.html" "security-autostart-ok"
+          Set-Location $app
+          & "$env:RUNNER_TEMP\minit-security-venv\Scripts\minit.exe" deploy
+          if ($LASTEXITCODE -ne 0) { throw "deploy failed" }
+      - name: Security doctor and initialize Windows-backed keys
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\security-app"
+          $minit = "$env:RUNNER_TEMP\minit-security-venv\Scripts\minit.exe"
+          Set-Location $app
+          & $minit security doctor
+          if ($LASTEXITCODE -ne 0) { throw "security doctor rejected Windows keyring" }
+          & $minit security init
+          if ($LASTEXITCODE -ne 0) { throw "security init failed" }
+          & "$env:RUNNER_TEMP\minit-security-venv\Scripts\python.exe" -c "from minit.secrets import set_secret; from pathlib import Path; set_secret('DOGFOOD_TOKEN','simulated-only-value',Path(r'$app'))"
+          if ($LASTEXITCODE -ne 0) { throw "secret set failed" }
+      - name: Verify keyring persistence in a new process without printing secret
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\security-app"
+          & "$env:RUNNER_TEMP\minit-security-venv\Scripts\python.exe" -c "from minit.secrets import get_secret; from pathlib import Path; assert get_secret('DOGFOOD_TOKEN',Path(r'$app')) == 'simulated-only-value'"
+          if ($LASTEXITCODE -ne 0) { throw "keyring persistence failed" }
+      - name: Install actual Task Scheduler entry and manually execute it
+        shell: pwsh
+        run: |
+          $app = "$env:RUNNER_TEMP\security-app"
+          $minit = "$env:RUNNER_TEMP\minit-security-venv\Scripts\minit.exe"
+          Set-Location $app
+          & $minit autostart install
+          if ($LASTEXITCODE -ne 0) { throw "autostart install failed" }
+          $manifest = Get-Content ".minit\app.json" | ConvertFrom-Json
+          $taskName = "Minit-" + ($manifest.id.ToLower().Replace('-',''))
+          schtasks /Query /TN $taskName /V /FO LIST | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Task Scheduler entry not found" }
+          & $minit stop
+          Start-Sleep -Seconds 1
+          schtasks /Run /TN $taskName | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not manually trigger scheduled task" }
+          $ok = $false
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 500
+            try {
+              $body = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000" -TimeoutSec 2).Content
+              if ($body -match "security-autostart-ok") { $ok = $true; break }
+            } catch {}
+          }
+          if (-not $ok) { throw "Scheduled task did not restore the local service" }
+          & $minit autostart remove
+          schtasks /Query /TN $taskName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "Task Scheduler entry remained after remove" }
+          & $minit stop
