@@ -5,7 +5,8 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from minit.main import app
-from minit.service import load_service_spec
+from minit.registry import register_project
+from minit.service import configure_local_service, load_service_spec
 from minit.state import create_manifest, record_publish_start, record_publish_stop
 
 runner = CliRunner()
@@ -42,6 +43,7 @@ def test_status_fails_cleanly_without_manifest(tmp_path: Path, monkeypatch):
 
 def test_deploy_configures_local_service_without_upload(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINIT_HOME", str(tmp_path / "home"))
 
     with patch("minit.main._port_open", return_value=False), patch(
         "minit.main.start_local_service",
@@ -62,13 +64,33 @@ def test_deploy_configures_local_service_without_upload(tmp_path: Path, monkeypa
     assert spec["port"] == 8000
 
 
-def test_deploy_requires_explicit_app_command(tmp_path: Path, monkeypatch):
+def test_deploy_auto_detects_static_app(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINIT_HOME", str(tmp_path / "home"))
+    (tmp_path / "index.html").write_text("<h1>hello</h1>", encoding="utf-8")
+
+    with patch("minit.main._port_open", return_value=False), patch(
+        "minit.main.start_local_service",
+        return_value={"supervisor_pid": 1234, "status": "running"},
+    ):
+        result = runner.invoke(app, ["deploy"])
+
+    assert result.exit_code == 0
+    assert "Detected:" in result.stdout
+    assert "static" in result.stdout
+    spec = load_service_spec(tmp_path)
+    assert spec is not None
+    assert spec["port"] == 8000
+    assert spec["command"] == ["python", "-m", "http.server", "8000", "--bind", "127.0.0.1"]
+
+
+def test_deploy_ambiguous_project_fails_cleanly(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(app, ["deploy", "--port", "8000"])
+    result = runner.invoke(app, ["deploy"])
 
     assert result.exit_code == 2
-    assert "No app command provided" in result.stdout
+    assert "Could not auto-detect" in result.stdout
 
 
 def test_deploy_refuses_to_take_over_an_occupied_port(tmp_path: Path, monkeypatch):
@@ -82,3 +104,28 @@ def test_deploy_refuses_to_take_over_an_occupied_port(tmp_path: Path, monkeypatc
 
     assert result.exit_code == 1
     assert "already in use" in result.stdout
+
+
+def test_ls_and_targeted_status_work_outside_project(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    project = tmp_path / "apps" / "alpha"
+    elsewhere = tmp_path / "elsewhere"
+    project.mkdir(parents=True)
+    elsewhere.mkdir()
+    monkeypatch.setenv("MINIT_HOME", str(home))
+
+    create_manifest(project, name="alpha")
+    configure_local_service(["python", "app.py"], 8123, project)
+    register_project(project)
+    monkeypatch.chdir(elsewhere)
+
+    listed = runner.invoke(app, ["ls"])
+    status = runner.invoke(app, ["status", "alpha"])
+
+    assert listed.exit_code == 0
+    assert "alpha" in listed.stdout
+    assert "8123" in listed.stdout
+    assert str(project) in listed.stdout
+    assert status.exit_code == 0
+    assert "alpha" in status.stdout
+    assert str(project.resolve()) in status.stdout
