@@ -31,11 +31,12 @@ LANDLOCK_ACCESS_FS_MAKE_SYM = 1 << 12
 LANDLOCK_ACCESS_FS_REFER = 1 << 13
 LANDLOCK_ACCESS_FS_TRUNCATE = 1 << 14
 
-READ_EXEC = (
+READ_EXEC_DIR = (
     LANDLOCK_ACCESS_FS_EXECUTE
     | LANDLOCK_ACCESS_FS_READ_FILE
     | LANDLOCK_ACCESS_FS_READ_DIR
 )
+READ_EXEC_FILE = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE
 WRITE_BASIC = (
     LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -84,7 +85,7 @@ def landlock_abi() -> int:
 
 
 def _handled_access(abi: int) -> int:
-    access = READ_EXEC | WRITE_BASIC
+    access = READ_EXEC_DIR | WRITE_BASIC
     if abi >= 2:
         access |= LANDLOCK_ACCESS_FS_REFER
     if abi >= 3:
@@ -101,13 +102,29 @@ def _write_access(abi: int) -> int:
     return access
 
 
+def _access_for_path(path: Path, requested: int) -> int:
+    """Strip Landlock rights that are invalid for a regular-file parent_fd."""
+    if path.is_dir():
+        return requested
+    valid_file_access = (
+        LANDLOCK_ACCESS_FS_EXECUTE
+        | LANDLOCK_ACCESS_FS_WRITE_FILE
+        | LANDLOCK_ACCESS_FS_READ_FILE
+        | LANDLOCK_ACCESS_FS_TRUNCATE
+    )
+    return requested & valid_file_access
+
+
 def _add_path_rule(ruleset_fd: int, path: Path, access: int) -> None:
     if not path.exists():
+        return
+    allowed = _access_for_path(path, access)
+    if not allowed:
         return
     flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_CLOEXEC
     fd = os.open(str(path), flags)
     try:
-        attr = PathBeneathAttr(allowed_access=access, parent_fd=fd)
+        attr = PathBeneathAttr(allowed_access=allowed, parent_fd=fd)
         _syscall(
             SYS_LANDLOCK_ADD_RULE,
             ctypes.c_int(ruleset_fd),
@@ -163,9 +180,10 @@ def apply_landlock(project_dir: Path) -> int:
             if key in seen:
                 continue
             seen.add(key)
-            _add_path_rule(ruleset_fd, path, READ_EXEC)
+            access = READ_EXEC_DIR if path.is_dir() else READ_EXEC_FILE
+            _add_path_rule(ruleset_fd, path, access)
 
-        _add_path_rule(ruleset_fd, data, READ_EXEC | _write_access(abi))
+        _add_path_rule(ruleset_fd, data, READ_EXEC_DIR | _write_access(abi))
 
         if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
             error = ctypes.get_errno()
