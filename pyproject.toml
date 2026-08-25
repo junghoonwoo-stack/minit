@@ -37,7 +37,7 @@ Repository = "https://github.com/junghoonwoo-stack/minit"
 Issues = "https://github.com/junghoonwoo-stack/minit/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=9.1.1"]
 
 [project.scripts]
 minit = "minit.commands:app"
